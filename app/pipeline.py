@@ -205,11 +205,12 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
             return True
         
         # Actual withdrawal
-        withdrawal_id = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
-        
-        if withdrawal_id:
+        success, result = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
+
+        if success:
+            withdrawal_id = result.get('withdraw_id', 'N/A')
             logger.info(f"✅ Withdrawal successful: {withdrawal_id}")
-            
+
             # Notify user
             await telegram.send_message(
                 str(deposit.user_id),
@@ -218,10 +219,11 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
                 f"Address: {deposit.target_address[:10]}...\n"
                 f"Withdrawal ID: {withdrawal_id}"
             )
-            
+
             return True
         else:
-            logger.error("❌ Withdrawal failed")
+            error_msg = result.get('error', 'Unknown error')
+            logger.error(f"❌ Withdrawal failed: {error_msg}")
             return False
             
     except Exception as e:
