@@ -200,7 +200,7 @@ async def worker_cycle() -> Dict[str, Any]:
                     is_valid, error_msg = validate_amount(CoinType(deposit.coin), onchain_amount)
                     if not is_valid:
                         logger.error(f"❌ Amount too small: {onchain_amount} {deposit.coin}")
-                        await db.update_deposit_status(deposit.txid, DepositStatus.TRADE_FAILED)
+                        await db.update_deposit_status(deposit.txid, DepositStatus.AMOUNT_TOO_SMALL)
                         
                         # Notify user
                         try:
