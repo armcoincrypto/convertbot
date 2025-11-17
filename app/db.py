@@ -105,8 +105,8 @@ async def get_pending_deposits(statuses: List[DepositStatus] = None) -> List[Dep
             required_confs=row['required_confs'],
             target_address=row['target_address'],
             onchain_amount=row['onchain_amount'] if row['onchain_amount'] else None,
-            usdt_amount=row['usdt_amount'] if row.get('usdt_amount') else None,
-            final_usdt=row['final_usdt'] if row.get('final_usdt') else None,
+            usdt_amount=row['usdt_amount'] if row['usdt_amount'] is not None else None,
+            final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
         ))
     return deposits
 
@@ -269,10 +269,10 @@ async def get_user_deposits(user_id: int, limit: int = 10) -> List[Deposit]:
                 required_confs=row['required_confs'],
                 target_address=row['target_address'],
                 onchain_amount=row['onchain_amount'] if row['onchain_amount'] else None,
-                usdt_amount=row['usdt_amount'] if row.get('usdt_amount') else None,
-                final_usdt=row['final_usdt'] if row.get('final_usdt') else None,
+                usdt_amount=row['usdt_amount'] if row['usdt_amount'] is not None else None,
+                final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
             ))
-        
+
         return deposits
 
 
