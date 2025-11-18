@@ -112,7 +112,7 @@ async def worker_cycle() -> Dict[str, Any]:
                     if confs is None:
                         logger.warning(f"⚠️  Could not get confirmations from explorer")
                         # XMR: Check MEXC deposit history
-                        if deposit.coin == "XMR":
+                        if deposit.coin == CoinType.XMR:
                             logger.info("💰 XMR: Checking MEXC deposit history...")
                             try:
                                 deposits_list = mexc.get_deposit_history(coin="XMR", limit=50)
