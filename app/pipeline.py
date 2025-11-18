@@ -211,13 +211,14 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
             withdrawal_id = result.get('withdraw_id', 'N/A')
             logger.info(f"✅ Withdrawal successful: {withdrawal_id}")
 
-            # Notify user
+            # Notify user in Armenian
             await telegram.send_message(
                 str(deposit.user_id),
-                f"✅ Withdrawal complete!\n"
-                f"Amount: {final_amount:.2f} USDT\n"
-                f"Address: {deposit.target_address[:10]}...\n"
-                f"Withdrawal ID: {withdrawal_id}"
+                f"✅ Փոխանակումը ավարտված է!\n\n"
+                f"💰 Ստացել եք: {final_amount:.2f} USDT\n"
+                f"📍 Հասցե: {deposit.target_address}\n"
+                f"🆔 Withdrawal ID: {withdrawal_id}\n\n"
+                f"Շնորհակալություն! 🎉"
             )
 
             return True
