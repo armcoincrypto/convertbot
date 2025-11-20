@@ -19,6 +19,7 @@ from exec.router import OrderRouter
 from ops.pos_size import PositionSizer
 from risk.breaker import RiskBreaker
 from position_manager import PositionManager
+from telegram_notifier import TelegramNotifier
 
 # Configure logging
 logging.basicConfig(
@@ -67,6 +68,7 @@ class ScalperBot:
         self.position_sizer = PositionSizer()
         self.risk_breaker = RiskBreaker(self.db)
         self.position_manager = PositionManager(settings)
+        self.telegram = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
 
         # State
         self.running = False
@@ -84,9 +86,14 @@ class ScalperBot:
             logger.info(f"💰 USDT Balance: ${usdt_balance:.2f}")
         except Exception as e:
             logger.warning(f"⚠️ Could not fetch balance: {e}")
-            self.risk_breaker.set_starting_balance(1000.0)  # Default
+            usdt_balance = 1000.0
+            self.risk_breaker.set_starting_balance(usdt_balance)  # Default
 
         logger.info("✅ Initialization complete")
+
+        # Send startup notification
+        mode = "DRY_RUN" if settings.dry_run else "LIVE"
+        await self.telegram.notify_startup(mode, usdt_balance, settings.trading_pairs)
 
     async def trading_loop(self):
         """Main trading loop - runs strategy and executes trades"""
@@ -103,6 +110,11 @@ class ScalperBot:
                 # Check risk breaker
                 if not self.risk_breaker.can_trade():
                     logger.error("⛔ Risk breaker active - skipping trading")
+                    # Send Telegram notification (only once when first triggered)
+                    if not hasattr(self, '_risk_breaker_notified'):
+                        status = self.risk_breaker.get_status()
+                        await self.telegram.notify_risk_breaker(status['loss_pct'], settings.daily_loss_limit_pct)
+                        self._risk_breaker_notified = True
                     await asyncio.sleep(settings.strategy_interval)
                     continue
 
@@ -162,8 +174,12 @@ class ScalperBot:
         if settings.dry_run:
             logger.info(f"🔶 [DRY_RUN] Would close {position.quantity:.6f} {symbol}")
             closed_pos = self.position_manager.close_position(symbol, exit_price, reason)
-            self.db.update_trade_pnl(closed_pos.trade_id,
-                                     ((exit_price - closed_pos.entry_price) / closed_pos.entry_price) * 10000)
+            pnl_bps = ((exit_price - closed_pos.entry_price) / closed_pos.entry_price) * 10000
+            pnl_usd = (pnl_bps / 10000) * (closed_pos.entry_price * closed_pos.quantity)
+            self.db.update_trade_pnl(closed_pos.trade_id, pnl_bps)
+            # Send Telegram notification
+            await self.telegram.notify_trade_closed(symbol, closed_pos.entry_price, exit_price,
+                                                     pnl_bps, pnl_usd, reason)
             return
 
         # Place market order to close
@@ -173,9 +189,13 @@ class ScalperBot:
         if order:
             closed_pos = self.position_manager.close_position(symbol, exit_price, reason)
             pnl_bps = ((exit_price - closed_pos.entry_price) / closed_pos.entry_price) * 10000
+            pnl_usd = (pnl_bps / 10000) * (closed_pos.entry_price * closed_pos.quantity)
             self.db.update_trade_pnl(closed_pos.trade_id, pnl_bps)
             self.position_sizer.decrement_positions()
             logger.info(f"✅ Position closed successfully")
+            # Send Telegram notification
+            await self.telegram.notify_trade_closed(symbol, closed_pos.entry_price, exit_price,
+                                                     pnl_bps, pnl_usd, reason)
         else:
             logger.error(f"❌ Failed to close position")
 
@@ -239,6 +259,8 @@ class ScalperBot:
                 # Track position in DRY_RUN mode too
                 self.position_manager.open_position(symbol, price, quantity, 'buy', trade_id)
                 self.position_sizer.increment_positions()
+                # Send Telegram notification
+                await self.telegram.notify_trade_opened(symbol, action, price, quantity, notional_usd)
                 return
 
             # Place market order
@@ -252,6 +274,8 @@ class ScalperBot:
                 self.position_manager.open_position(symbol, filled_price, quantity, side, trade_id)
                 self.position_sizer.increment_positions()
                 logger.info(f"✅ Order executed successfully: {order_id}")
+                # Send Telegram notification
+                await self.telegram.notify_trade_opened(symbol, action, filled_price, quantity, notional_usd)
             else:
                 self.db.update_trade_status(trade_id, 'FAILED')
                 logger.error(f"❌ Order execution failed")
