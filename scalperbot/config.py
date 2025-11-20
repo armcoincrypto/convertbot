@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # Risk management
     daily_loss_limit_pct: float = 3.0  # Stop trading if down 3% for the day
 
+    # Advanced risk parameters (Hybrid Approach)
+    max_spread_bps: float = 6.0  # Max spread in basis points
+    trail_stop_bps: float = 15.0  # Trail stop distance
+    trail_activation_bps: float = 15.0  # Profit before trailing starts
+    time_stop_seconds: int = 180  # Exit if not profitable after 3 min
+    cooldown_after_loss_seconds: int = 300  # 5 min cooldown after loss
+
     # Database
     database_path: str = "scalperbot/trades.db"
 
