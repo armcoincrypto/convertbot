@@ -203,3 +203,5 @@ sudo systemctl start convertbot-worker
 5. ✅ Updated notifications to Armenian
 6. ✅ Deployed to VPS with static IP
 7. ✅ Set up as systemd service for 24/7 operation
+8. ✅ Fixed TRX withdrawal support for DASH → TRON swaps
+9. ✅ Fixed withdrawal message to show clean withdrawal IDs instead of raw tuples
