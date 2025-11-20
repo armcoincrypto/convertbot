@@ -14,12 +14,23 @@ from exchanges.adapter import MEXCAdapter
 from datafeed.candle_store import CandleStore
 from datafeed.orderbook import OrderBook
 from datafeed.rest_poller import RESTPoller
-from strategies.momentum_breakout import MomentumBreakoutStrategy
 from exec.router import OrderRouter
-from ops.pos_size import PositionSizer
 from risk.breaker import RiskBreaker
-from position_manager import PositionManager
 from telegram_notifier import TelegramNotifier
+
+# Strategy version conditional imports
+if settings.strategy_version == "2.0":
+    from strategies.scalper_v2 import ScalperV2Strategy
+    from position_manager_v2 import PositionManagerV2
+    from exec.sizer_v2 import PositionSizerV2
+    logger = logging.getLogger(__name__)
+    logger.info("📦 Loading ScalperBot v2.0 components...")
+else:
+    from strategies.momentum_breakout import MomentumBreakoutStrategy
+    from position_manager import PositionManager
+    from ops.pos_size import PositionSizer
+    logger = logging.getLogger(__name__)
+    logger.info("📦 Loading ScalperBot v1.0 components...")
 
 # Configure logging
 logging.basicConfig(
@@ -42,12 +53,12 @@ class ScalperBot:
 
     def __init__(self):
         logger.info("="*80)
-        logger.info("🚀 ScalperBot Initializing...")
+        logger.info(f"🚀 ScalperBot v{settings.strategy_version} Initializing...")
         logger.info(f"Mode: {'🔶 DRY_RUN' if settings.dry_run else '🟢 LIVE'}")
         logger.info(f"Trading pairs: {settings.trading_pairs}")
         logger.info("="*80)
 
-        # Initialize components
+        # Initialize common components
         self.db = TradeDB(settings.database_path)
         self.exchange = MEXCAdapter(
             settings.mexc_api_key,
@@ -63,16 +74,26 @@ class ScalperBot:
             settings.trading_pairs,
             settings.data_poll_interval
         )
-        self.strategy = MomentumBreakoutStrategy(self.candle_store)
         self.router = OrderRouter(self.exchange, self.orderbook)
-        self.position_sizer = PositionSizer()
         self.risk_breaker = RiskBreaker(self.db)
-        self.position_manager = PositionManager(settings)
         self.telegram = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
+
+        # Initialize strategy-specific components
+        if settings.strategy_version == "2.0":
+            self.strategy = ScalperV2Strategy(self.candle_store)
+            self.position_manager = PositionManagerV2(settings)
+            self.position_sizer = PositionSizerV2()
+            logger.info("✅ v2.0 components loaded: Professional 4-filter strategy")
+        else:
+            self.strategy = MomentumBreakoutStrategy(self.candle_store)
+            self.position_manager = PositionManager(settings)
+            self.position_sizer = PositionSizer()
+            logger.info("✅ v1.0 components loaded: Momentum breakout strategy")
 
         # State
         self.running = False
         self.poller_task = None
+        self.strategy_version = settings.strategy_version
 
     async def initialize(self):
         """Initialize bot (fetch balance, set risk params, etc.)"""
@@ -228,17 +249,39 @@ class ScalperBot:
 
             logger.info(f"✅ Pre-trade checks passed (spread: {spread_bps:.1f} bps)")
 
-            # Calculate position size
-            pos_size = self.position_sizer.calculate_size(symbol, price)
+            # Calculate position size (version-specific)
+            if self.strategy_version == "2.0":
+                # v2.0: ATR-based dynamic sizing
+                atr_bps = signal.get('atr_bps', 15.0)  # Get ATR from signal
+                balance = self.exchange.fetch_balance()
+                equity_usd = balance.get('USDT', {}).get('free', 1000.0)
 
-            if not pos_size['can_trade']:
-                logger.warning(f"⚠️ Cannot trade: {pos_size['reason']}")
-                return
+                # Calculate SL distance from v2.0 dynamic stops
+                from risk.stops import DynamicStops
+                stops_calc = DynamicStops()
+                sl_info = stops_calc.calculate_stop_loss(symbol, price, atr_bps)
+                sl_bps = sl_info['sl_bps']
+
+                pos_size = self.position_sizer.calculate_size(symbol, price, equity_usd, atr_bps, sl_bps)
+
+                if not pos_size['can_trade']:
+                    logger.warning(f"⚠️ Cannot trade: {pos_size['reason']}")
+                    return
+
+                # Log v2.0 sizing details
+                self.position_sizer.log_size_calculation(pos_size, symbol)
+            else:
+                # v1.0: Fixed sizing
+                pos_size = self.position_sizer.calculate_size(symbol, price)
+
+                if not pos_size['can_trade']:
+                    logger.warning(f"⚠️ Cannot trade: {pos_size['reason']}")
+                    return
+
+                logger.info(f"Position size: {pos_size['quantity']:.6f} {symbol.split('/')[0]} (${pos_size['notional_usd']:.2f})")
 
             quantity = pos_size['quantity']
             notional_usd = pos_size['notional_usd']
-
-            logger.info(f"Position size: {quantity:.6f} {symbol.split('/')[0]} (${notional_usd:.2f})")
 
             # Log trade to database (NEW status)
             trade_id = self.db.log_trade(
@@ -256,8 +299,12 @@ class ScalperBot:
             if settings.dry_run:
                 logger.info(f"🔶 [DRY_RUN] Would place {action} order for {quantity:.6f} {symbol}")
                 self.db.update_trade_status(trade_id, 'DRY_RUN')
-                # Track position in DRY_RUN mode too
-                self.position_manager.open_position(symbol, price, quantity, 'buy', trade_id)
+                # Track position in DRY_RUN mode (version-specific)
+                if self.strategy_version == "2.0":
+                    atr_bps = signal.get('atr_bps', 15.0)
+                    self.position_manager.open_position(symbol, price, quantity, 'buy', trade_id, atr_bps)
+                else:
+                    self.position_manager.open_position(symbol, price, quantity, 'buy', trade_id)
                 self.position_sizer.increment_positions()
                 # Send Telegram notification
                 await self.telegram.notify_trade_opened(symbol, action, price, quantity, notional_usd)
@@ -271,7 +318,12 @@ class ScalperBot:
                 order_id = order.get('id')
                 filled_price = order.get('price', price)
                 self.db.update_trade_status(trade_id, 'FILLED', order_id)
-                self.position_manager.open_position(symbol, filled_price, quantity, side, trade_id)
+                # Open position (version-specific)
+                if self.strategy_version == "2.0":
+                    atr_bps = signal.get('atr_bps', 15.0)
+                    self.position_manager.open_position(symbol, filled_price, quantity, side, trade_id, atr_bps)
+                else:
+                    self.position_manager.open_position(symbol, filled_price, quantity, side, trade_id)
                 self.position_sizer.increment_positions()
                 logger.info(f"✅ Order executed successfully: {order_id}")
                 # Send Telegram notification

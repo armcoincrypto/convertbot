@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Trading mode
     dry_run: bool = True
 
+    # Strategy version (1.0 or 2.0)
+    strategy_version: str = "1.0"  # Set to "2.0" to use professional scalper
+
     # Trading pairs
     trading_pairs: List[str] = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
 
@@ -45,11 +48,12 @@ class Settings(BaseSettings):
     # Risk management
     daily_loss_limit_pct: float = 3.0  # Stop trading if down 3% for the day
 
-    # Advanced risk parameters (Hybrid Approach)
+    # Advanced risk parameters (v1.0 Hybrid Approach / v2.0 uses pair-specific)
     max_spread_bps: float = 6.0  # Max spread in basis points
-    trail_stop_bps: float = 15.0  # Trail stop distance
-    trail_activation_bps: float = 15.0  # Profit before trailing starts
-    time_stop_seconds: int = 180  # Exit if not profitable after 3 min
+    trail_stop_bps: float = 15.0  # Trail stop distance (v1.0 only)
+    trail_activation_bps: float = 15.0  # Profit before trailing starts (v1.0 only)
+    time_stop_seconds: int = 180  # Exit if not profitable after N seconds
+    time_stop_min_profit_bps: float = 10.0  # Minimum profit to avoid time stop (v2.0)
     cooldown_after_loss_seconds: int = 300  # 5 min cooldown after loss
 
     # Database
