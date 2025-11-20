@@ -176,18 +176,20 @@ async def _notify_error(deposit: Deposit, error: str):
 
 
 async def withdraw_usdt_only(deposit: Deposit) -> bool:
-    """Withdraw USDT for an already-sold deposit"""
+    """Withdraw USDT or TRX for an already-sold deposit"""
     from app.config import settings
     from libs.mexc_client import MEXCClient
     from libs.telegram_client import TelegramClient
     import asyncio
-    
-    logger.info(f"📤 Withdrawing USDT for {deposit.txid[:16]}...")
-    
+
+    # Determine output coin (default to USDT for backward compatibility)
+    output_coin = deposit.output_coin if hasattr(deposit, 'output_coin') and deposit.output_coin else 'USDT'
+    logger.info(f"📤 Withdrawing {output_coin} for {deposit.txid[:16]}...")
+
     try:
         mexc = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret)
         telegram = TelegramClient(settings.telegram_bot_token, settings.admin_chat_id)
-        
+
         # Get stored USDT amount from database
         if deposit.usdt_amount and deposit.usdt_amount > 0:
             usdt_amount = deposit.usdt_amount
@@ -197,36 +199,73 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
             # Fallback: shouldn't happen, but just in case
             logger.error(f"❌ No stored USDT amount! This shouldn't happen.")
             return False
-        
-        logger.info(f"💵 Final withdrawal: {final_amount:.2f} USDT")
-        
+
         if settings.dry_run:
-            logger.info(f"🧪 DRY RUN: Would withdraw {final_amount:.2f} USDT")
+            logger.info(f"🧪 DRY RUN: Would withdraw {final_amount:.2f} {output_coin}")
             return True
-        
-        # Actual withdrawal
-        success, result = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
 
-        if success:
-            withdrawal_id = result.get('withdraw_id', 'N/A')
-            logger.info(f"✅ Withdrawal successful: {withdrawal_id}")
+        # Handle TRX withdrawals (buy TRX with USDT first)
+        if output_coin == 'TRX':
+            logger.info(f"💱 Converting USDT → TRX on MEXC...")
 
-            # Notify user in Armenian
-            await telegram.send_message(
-                str(deposit.user_id),
-                f"✅ Փոխանակումը ավարտված է!\n\n"
-                f"💰 Ստացել եք: {final_amount:.2f} USDT\n"
-                f"📍 Հասցե: {deposit.target_address}\n"
-                f"🆔 Withdrawal ID: {withdrawal_id}\n\n"
-                f"Շնորհակալություն! 🎉"
-            )
+            # Buy TRX with USDT
+            success, result = mexc.buy_crypto_with_usdt('TRX', final_amount)
+            if not success:
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"❌ Failed to buy TRX: {error_msg}")
+                return False
 
-            return True
+            trx_amount = result.get('amount', 0)
+            logger.info(f"✅ Bought {trx_amount:.2f} TRX with {final_amount:.2f} USDT")
+
+            # Withdraw TRX
+            success, result = mexc.withdraw_trx(deposit.target_address, trx_amount)
+            if success:
+                withdrawal_id = result.get('withdraw_id', 'N/A')
+                logger.info(f"✅ TRX Withdrawal successful: {withdrawal_id}")
+
+                # Notify user in Armenian
+                await telegram.send_message(
+                    str(deposit.user_id),
+                    f"✅ Փոխանակումը ավարտված է!\n\n"
+                    f"💰 Ստացել եք: {trx_amount:.2f} TRX\n"
+                    f"📍 Հասցե: {deposit.target_address}\n"
+                    f"🆔 Withdrawal ID: {withdrawal_id}\n\n"
+                    f"Շնորհակալություն! 🎉"
+                )
+                return True
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"❌ TRX Withdrawal failed: {error_msg}")
+                return False
+
+        # Handle USDT withdrawals (original logic)
         else:
-            error_msg = result.get('error', 'Unknown error')
-            logger.error(f"❌ Withdrawal failed: {error_msg}")
-            return False
-            
+            logger.info(f"💵 Final withdrawal: {final_amount:.2f} USDT")
+
+            # Actual withdrawal
+            success, result = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
+
+            if success:
+                withdrawal_id = result.get('withdraw_id', 'N/A')
+                logger.info(f"✅ Withdrawal successful: {withdrawal_id}")
+
+                # Notify user in Armenian
+                await telegram.send_message(
+                    str(deposit.user_id),
+                    f"✅ Փոխանակումը ավարտված է!\n\n"
+                    f"💰 Ստացել եք: {final_amount:.2f} USDT\n"
+                    f"📍 Հասցե: {deposit.target_address}\n"
+                    f"🆔 Withdrawal ID: {withdrawal_id}\n\n"
+                    f"Շնորհակալություն! 🎉"
+                )
+
+                return True
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"❌ Withdrawal failed: {error_msg}")
+                return False
+
     except Exception as e:
         logger.error(f"💥 Withdrawal error: {e}")
         return False
