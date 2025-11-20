@@ -8,17 +8,17 @@ import signal
 import sys
 from datetime import datetime
 
-from scalperbot.config import settings
-from scalperbot.db import TradeDB
-from scalperbot.exchanges.adapter import MEXCAdapter
-from scalperbot.datafeed.candle_store import CandleStore
-from scalperbot.datafeed.orderbook import OrderBook
-from scalperbot.datafeed.rest_poller import RESTPoller
-from scalperbot.strategies.momentum_breakout import MomentumBreakoutStrategy
-from scalperbot.exec.router import OrderRouter
-from scalperbot.ops.pos_size import PositionSizer
-from scalperbot.risk.breaker import RiskBreaker
-from scalperbot.position_manager import PositionManager
+from config import settings
+from db import TradeDB
+from exchanges.adapter import MEXCAdapter
+from datafeed.candle_store import CandleStore
+from datafeed.orderbook import OrderBook
+from datafeed.rest_poller import RESTPoller
+from strategies.momentum_breakout import MomentumBreakoutStrategy
+from exec.router import OrderRouter
+from ops.pos_size import PositionSizer
+from risk.breaker import RiskBreaker
+from position_manager import PositionManager
 
 # Configure logging
 logging.basicConfig(
