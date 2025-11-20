@@ -5,8 +5,8 @@ Handles order placement with proper quantization and validation
 import logging
 from typing import Optional, Dict, Any
 from decimal import Decimal, ROUND_DOWN
-from scalperbot.exchanges.adapter import MEXCAdapter
-from scalperbot.datafeed.orderbook import OrderBook
+from exchanges.adapter import MEXCAdapter
+from datafeed.orderbook import OrderBook
 
 logger = logging.getLogger(__name__)
 
@@ -201,3 +201,68 @@ class OrderRouter:
     def get_order_status(self, order_id: str, symbol: str) -> Optional[Dict]:
         """Get order status"""
         return self.exchange.fetch_order(order_id, symbol)
+
+    def check_depth(
+        self,
+        symbol: str,
+        notional_usd: float,
+        side: str = 'buy',
+        depth_multiplier: float = 3.0,
+        max_slippage_bps: float = 4.0
+    ) -> Dict[str, any]:
+        """
+        Check order book depth before execution
+
+        Args:
+            symbol: Trading pair
+            notional_usd: Position size in USD
+            side: 'buy' or 'sell'
+            depth_multiplier: Required liquidity as multiple of position size
+            max_slippage_bps: Maximum acceptable slippage in basis points
+
+        Returns:
+            Dict with depth analysis
+        """
+        orderbook = self.orderbook.get_orderbook(symbol)
+        if not orderbook:
+            return {
+                'sufficient': False,
+                'reason': 'No orderbook data',
+                'available_liquidity_usd': 0
+            }
+
+        # Get best price
+        if side == 'buy':
+            best_price = orderbook.get('bids', [[0, 0]])[0][0] if orderbook.get('bids') else 0
+            levels = orderbook.get('asks', [])
+        else:
+            best_price = orderbook.get('asks', [[0, 0]])[0][0] if orderbook.get('asks') else 0
+            levels = orderbook.get('bids', [])
+
+        if best_price == 0 or not levels:
+            return {
+                'sufficient': False,
+                'reason': 'No price levels available',
+                'available_liquidity_usd': 0
+            }
+
+        # Calculate available liquidity within slippage tolerance
+        max_price = best_price * (1 + max_slippage_bps / 10000) if side == 'buy' else best_price * (1 - max_slippage_bps / 10000)
+
+        available_liquidity_usd = 0
+        for price, size in levels:
+            if (side == 'buy' and price <= max_price) or (side == 'sell' and price >= max_price):
+                available_liquidity_usd += price * size
+            else:
+                break
+
+        required_liquidity = notional_usd * depth_multiplier
+        sufficient = available_liquidity_usd >= required_liquidity
+
+        return {
+            'sufficient': sufficient,
+            'available_liquidity_usd': available_liquidity_usd,
+            'required_liquidity_usd': required_liquidity,
+            'depth_ratio': available_liquidity_usd / notional_usd if notional_usd > 0 else 0,
+            'reason': 'Sufficient depth' if sufficient else f'Insufficient depth: ${available_liquidity_usd:.0f} < ${required_liquidity:.0f}'
+        }
