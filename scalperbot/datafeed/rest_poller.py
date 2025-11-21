@@ -43,22 +43,65 @@ class RESTPoller:
     async def initialize_historical(self):
         """Fetch historical candles on startup to speed up warmup"""
         logger.info("🔄 Fetching historical candles for warmup...")
+        logger.info("📥 Loading multi-timeframe data for v2.0 strategy...")
 
         for symbol in self.symbols:
             try:
-                # Fetch last 500 1m candles (about 8 hours)
-                ohlcv = self.exchange.fetch_ohlcv(symbol, '1m', limit=500)
+                # Fetch 1m candles in chunks to build up sufficient history
+                # Need 6000+ minutes for 30m EMA200 (200 bars * 30 min)
+                # Fetch in multiple chunks since exchanges limit ~1000-1500 per request
 
-                if ohlcv:
-                    self.candle_store.initialize_historical(symbol, ohlcv)
-                    logger.info(f"✅ Loaded {len(ohlcv)} historical candles for {symbol}")
+                all_candles = []
+                chunks_to_fetch = [
+                    ('1m', 1000),  # ~16 hours
+                    ('1m', 1000),  # Another 16 hours (going back in time)
+                    ('1m', 1000),  # Another 16 hours
+                    ('1m', 1000),  # Another 16 hours
+                    ('1m', 1000),  # Another 16 hours
+                    ('1m', 1000),  # Another 16 hours
+                    ('1m', 1000),  # Another 16 hours (total ~112 hours = 4.6 days)
+                ]
+
+                logger.info(f"📊 {symbol}: Fetching {len(chunks_to_fetch)} chunks of historical data...")
+
+                for i, (timeframe, limit) in enumerate(chunks_to_fetch):
+                    try:
+                        # Calculate the 'since' timestamp for each chunk
+                        # Go back in time: chunk 0 is most recent, chunk 6 is oldest
+                        minutes_back = (len(chunks_to_fetch) - i) * limit
+                        since_ms = int((time.time() - (minutes_back * 60)) * 1000)
+
+                        ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit, since=since_ms)
+
+                        if ohlcv:
+                            all_candles.extend(ohlcv)
+                            logger.debug(f"  Chunk {i+1}/{len(chunks_to_fetch)}: +{len(ohlcv)} candles")
+
+                        # Delay to avoid rate limits
+                        await asyncio.sleep(0.3)
+
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to fetch chunk {i+1} for {symbol}: {e}")
+                        continue
+
+                if all_candles:
+                    # Remove duplicates and sort
+                    unique_candles = {}
+                    for candle in all_candles:
+                        timestamp = candle[0]
+                        unique_candles[timestamp] = candle
+
+                    sorted_candles = sorted(unique_candles.values(), key=lambda x: x[0])
+
+                    self.candle_store.initialize_historical(symbol, sorted_candles)
+                    logger.info(f"✅ {symbol}: Loaded {len(sorted_candles)} historical 1m candles (~{len(sorted_candles)/60:.1f} hours)")
                 else:
                     logger.warning(f"⚠️ No historical data for {symbol}")
 
             except Exception as e:
                 logger.error(f"❌ Error fetching historical data for {symbol}: {e}")
 
-            # Small delay to avoid rate limits
+            # Small delay between symbols to avoid rate limits
             await asyncio.sleep(0.5)
 
     async def poll_once(self):

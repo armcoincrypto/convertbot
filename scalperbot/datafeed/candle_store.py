@@ -25,8 +25,9 @@ class CandleStore:
         # Store resampled candles: {(symbol, timeframe): DataFrame}
         self.resampled: Dict[tuple, pd.DataFrame] = {}
 
-        # Max candles to keep in memory (1440 = 24 hours of 1m data)
-        self.max_candles = 1440
+        # Max candles to keep in memory (7200 = 5 days of 1m data)
+        # Need 6000+ minutes for 30m EMA200 (200 bars * 30 min = 6000 min)
+        self.max_candles = 7200
 
     def add_candle(
         self,
