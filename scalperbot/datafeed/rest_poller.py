@@ -52,14 +52,14 @@ class RESTPoller:
                 # Fetch in multiple chunks since exchanges limit ~1000-1500 per request
 
                 all_candles = []
+                # Fetch 14 chunks to ensure 200+ bars of 30m data for EMA200
+                # MEXC returns ~500 candles per request, so 14 * 500 = 7000 candles
+                # 7000 minutes / 30 = 233 bars of 30m data (enough for EMA200)
                 chunks_to_fetch = [
-                    ('1m', 1000),  # ~16 hours
-                    ('1m', 1000),  # Another 16 hours (going back in time)
-                    ('1m', 1000),  # Another 16 hours
-                    ('1m', 1000),  # Another 16 hours
-                    ('1m', 1000),  # Another 16 hours
-                    ('1m', 1000),  # Another 16 hours
-                    ('1m', 1000),  # Another 16 hours (total ~112 hours = 4.6 days)
+                    ('1m', 1000), ('1m', 1000), ('1m', 1000), ('1m', 1000),
+                    ('1m', 1000), ('1m', 1000), ('1m', 1000), ('1m', 1000),
+                    ('1m', 1000), ('1m', 1000), ('1m', 1000), ('1m', 1000),
+                    ('1m', 1000), ('1m', 1000),  # 14 chunks total
                 ]
 
                 logger.info(f"📊 {symbol}: Fetching {len(chunks_to_fetch)} chunks of historical data...")
