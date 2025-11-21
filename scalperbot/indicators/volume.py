@@ -3,7 +3,7 @@ Volume Indicators - Z-score and percentile analysis
 """
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
