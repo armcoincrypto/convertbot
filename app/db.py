@@ -22,6 +22,13 @@ def get_db_path():
 def _row_to_deposit(row) -> "Deposit":
     """Convert database row to Deposit object"""
     from app.models import Deposit, DepositStatus, CoinType
+
+    # Get output_coin with fallback to USDT for backward compatibility
+    try:
+        output_coin = row['output_coin'] if row['output_coin'] else 'USDT'
+    except (KeyError, IndexError):
+        output_coin = 'USDT'
+
     return Deposit(
         txid=row['txid'],
         coin=CoinType(row['coin']),
@@ -33,6 +40,7 @@ def _row_to_deposit(row) -> "Deposit":
         onchain_amount=row['onchain_amount'] if row['onchain_amount'] else 0.0,
         usdt_amount=row['usdt_amount'] if row['usdt_amount'] is not None else None,
         final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
+        output_coin=output_coin,
     )
 
 
