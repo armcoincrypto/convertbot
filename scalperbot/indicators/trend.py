@@ -162,7 +162,7 @@ class TrendIndicators:
     def check_multi_timeframe_trend(df_30m: pd.DataFrame, df_5m: pd.DataFrame) -> dict:
         """
         Check multi-timeframe trend alignment
-        Both 30m and 5m must be bullish
+        EITHER 30m OR 5m must be bullish (relaxed for more signals)
 
         Returns:
             Dict with complete trend analysis
@@ -170,7 +170,8 @@ class TrendIndicators:
         trend_30m = TrendIndicators.check_30m_trend(df_30m)
         momentum_5m = TrendIndicators.check_5m_momentum(df_5m)
 
-        aligned = trend_30m['bullish'] and momentum_5m['bullish']
+        # Changed from AND to OR - accept if either timeframe is bullish
+        aligned = trend_30m['bullish'] or momentum_5m['bullish']
 
         return {
             'aligned': aligned,
