@@ -104,18 +104,7 @@ async def get_pending_deposits(statuses: List[DepositStatus] = None) -> List[Dep
     
     deposits = []
     for row in rows:
-        deposits.append(Deposit(
-            txid=row['txid'],
-            coin=CoinType(row['coin']),
-            user_id=row['user_id'],
-            status=DepositStatus(row['status']),
-            confs=row['confs'],
-            required_confs=row['required_confs'],
-            target_address=row['target_address'],
-            onchain_amount=row['onchain_amount'] if row['onchain_amount'] else None,
-            usdt_amount=row['usdt_amount'] if row['usdt_amount'] is not None else None,
-            final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
-        ))
+        deposits.append(_row_to_deposit(row))
     return deposits
 
 
@@ -225,19 +214,8 @@ async def get_deposit(txid: str) -> Optional[Deposit]:
     
     if not row:
         return None
-    
-    return Deposit(
-        txid=row['txid'],
-        coin=CoinType(row['coin']),
-        user_id=row['user_id'],
-        status=DepositStatus(row['status']),
-        confs=row['confs'],
-        required_confs=row['required_confs'],
-        target_address=row['target_address'],
-        onchain_amount=row['onchain_amount'] if row['onchain_amount'] else None,
-        usdt_amount=row['usdt_amount'] if row['usdt_amount'] is not None else None,
-        final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
-    )
+
+    return _row_to_deposit(row)
 
 
 async def txid_exists(txid: str) -> bool:
@@ -268,18 +246,7 @@ async def get_user_deposits(user_id: int, limit: int = 10) -> List[Deposit]:
         
         deposits = []
         for row in rows:
-            deposits.append(Deposit(
-                txid=row['txid'],
-                coin=CoinType(row['coin']),
-                user_id=row['user_id'],
-                status=DepositStatus(row['status']),
-                confs=row['confs'],
-                required_confs=row['required_confs'],
-                target_address=row['target_address'],
-                onchain_amount=row['onchain_amount'] if row['onchain_amount'] else None,
-                usdt_amount=row['usdt_amount'] if row['usdt_amount'] is not None else None,
-                final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
-            ))
+            deposits.append(_row_to_deposit(row))
 
         return deposits
 
