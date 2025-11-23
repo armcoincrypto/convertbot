@@ -91,26 +91,33 @@ async def process_confirmed_deposit(deposit: Deposit) -> bool:
                 logger.info(f"✅ Trade complete: {usdt_amount:.2f} USDT received")
         
         # Step 3: Calculate fees
-        network_fee = 1.0
         commission = usdt_amount * (settings.commission_percent / 100)
-        total_fees = network_fee + commission
-        final_amount = usdt_amount - total_fees
-        
+        mexc_withdrawal_fee = 1.0  # MEXC's TRC20 withdrawal fee (deducted by MEXC)
+
+        # Amount we'll withdraw from MEXC (before their fee)
+        withdrawal_amount = usdt_amount - commission
+
+        # Amount user will actually receive (after MEXC deducts their fee)
+        final_amount = withdrawal_amount - mexc_withdrawal_fee
+
         if final_amount <= 0:
             logger.error(f"❌ Amount too small after fees")
             await _notify_error(deposit, f"Amount too small: {usdt_amount:.2f} USDT")
             await db.update_deposit_status(deposit.txid, DepositStatus.AMOUNT_TOO_SMALL)
             return False
-        
-        logger.info(f"💵 Breakdown: {usdt_amount:.2f} USDT - ${commission:.2f} commission ({settings.commission_percent}%) - ${network_fee:.2f} network = ${final_amount:.2f} final")
+
+        logger.info(f"💵 Breakdown: {usdt_amount:.2f} USDT - ${commission:.2f} commission ({settings.commission_percent}%) = ${withdrawal_amount:.2f} to withdraw")
+        logger.info(f"💵 User receives: ${withdrawal_amount:.2f} - ${mexc_withdrawal_fee:.2f} MEXC fee = ${final_amount:.2f} final")
         
         
         # Step 4: Withdrawal logic
         # XMR: Withdraw immediately (already fully confirmed on MEXC)
         # BTC/LTC/DASH: Two-tier (sell early, withdraw after full confs)
-        
-        # Store USDT amount in database
-        await db.update_deposit_usdt(deposit.txid, usdt_amount, final_amount)
+
+        # Store USDT amounts in database
+        # usdt_amount: What we got from selling
+        # withdrawal_amount: What we'll withdraw from MEXC (user receives this minus MEXC fee)
+        await db.update_deposit_usdt(deposit.txid, usdt_amount, withdrawal_amount)
         
         if deposit.coin == CoinType.XMR:
             # XMR: Already 10+ confs on MEXC, mark as SOLD and withdraw immediately
@@ -192,9 +199,11 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
 
         # Get stored USDT amount from database
         if deposit.usdt_amount and deposit.usdt_amount > 0:
-            usdt_amount = deposit.usdt_amount
-            final_amount = deposit.final_usdt if deposit.final_usdt > 0 else usdt_amount * 0.94
-            logger.info(f"💰 Using stored USDT: {usdt_amount:.2f} → {final_amount:.2f} final")
+            usdt_amount = deposit.usdt_amount  # What we got from selling
+            withdrawal_amount = deposit.final_usdt if deposit.final_usdt > 0 else usdt_amount * 0.94
+            mexc_fee = 1.0  # MEXC's withdrawal fee (TRC20/TRX)
+            final_amount = withdrawal_amount - mexc_fee  # What user actually receives
+            logger.info(f"💰 Stored: {usdt_amount:.2f} USDT → Withdraw: {withdrawal_amount:.2f} → User receives: {final_amount:.2f} (after MEXC {mexc_fee:.2f} fee)")
         else:
             # Fallback: shouldn't happen, but just in case
             logger.error(f"❌ No stored USDT amount! This shouldn't happen.")
@@ -208,27 +217,31 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
         if output_coin == 'TRX':
             logger.info(f"💱 Converting USDT → TRX on MEXC...")
 
-            # Buy TRX with USDT
-            success, result = mexc.buy_crypto_with_usdt('TRX', final_amount)
+            # Buy TRX with the full withdrawal amount (MEXC will deduct fee from TRX)
+            success, result = mexc.buy_crypto_with_usdt('TRX', withdrawal_amount)
             if not success:
                 error_msg = result.get('error', 'Unknown error')
                 logger.error(f"❌ Failed to buy TRX: {error_msg}")
                 return False
 
             trx_amount = result.get('amount', 0)
-            logger.info(f"✅ Bought {trx_amount:.2f} TRX with {final_amount:.2f} USDT")
+            logger.info(f"✅ Bought {trx_amount:.2f} TRX with {withdrawal_amount:.2f} USDT")
 
-            # Withdraw TRX
+            # Withdraw TRX (MEXC may deduct a small TRX fee, typically ~1 TRX)
             success, result = mexc.withdraw_trx(deposit.target_address, trx_amount)
             if success:
                 withdrawal_id = result.get('withdraw_id', 'N/A')
                 logger.info(f"✅ TRX Withdrawal successful: {withdrawal_id}")
 
+                # Estimate what user receives (TRX fee is usually ~1 TRX)
+                trx_fee_estimate = 1.0
+                estimated_received = trx_amount - trx_fee_estimate
+
                 # Notify user in Armenian
                 await telegram.send_message(
                     str(deposit.user_id),
                     f"✅ Փոխանակումը ավարտված է!\n\n"
-                    f"💰 Ստացել եք: {trx_amount:.2f} TRX\n"
+                    f"💰 Ստացել եք: ~{estimated_received:.2f} TRX\n"
                     f"📍 Հասցե: {deposit.target_address}\n"
                     f"🆔 Withdrawal ID: {withdrawal_id}\n\n"
                     f"Շնորհակալություն! 🎉"
@@ -239,18 +252,18 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
                 logger.error(f"❌ TRX Withdrawal failed: {error_msg}")
                 return False
 
-        # Handle USDT withdrawals (original logic)
+        # Handle USDT withdrawals
         else:
-            logger.info(f"💵 Final withdrawal: {final_amount:.2f} USDT")
+            logger.info(f"💵 Withdrawing {withdrawal_amount:.2f} USDT (user receives {final_amount:.2f} after MEXC {mexc_fee:.2f} fee)")
 
-            # Actual withdrawal
-            success, result = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
+            # Withdraw the full withdrawal_amount (MEXC will deduct their 1.0 USDT fee)
+            success, result = mexc.withdraw_usdt_trc20(deposit.target_address, withdrawal_amount)
 
             if success:
                 withdrawal_id = result.get('withdraw_id', 'N/A')
                 logger.info(f"✅ Withdrawal successful: {withdrawal_id}")
 
-                # Notify user in Armenian
+                # Notify user of the ACTUAL amount they'll receive (after MEXC fee)
                 await telegram.send_message(
                     str(deposit.user_id),
                     f"✅ Փոխանակումը ավարտված է!\n\n"
