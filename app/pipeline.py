@@ -125,6 +125,13 @@ async def process_confirmed_deposit(deposit: Deposit) -> bool:
             await db.update_deposit_status(deposit.txid, DepositStatus.SOLD)
             logger.info(f"✅ Marked as SOLD - ready for withdrawal")
 
+            # Reload deposit from DB to get updated USDT amounts
+            deposit = await db.get_deposit(deposit.txid)
+            if not deposit:
+                logger.error(f"❌ Could not reload deposit from database!")
+                return False
+            logger.info(f"✅ Reloaded deposit with USDT amounts: {deposit.usdt_amount:.2f} / {deposit.final_usdt:.2f}")
+
             # Use the same withdrawal function as BTC/LTC/DASH
             # This will check output_coin and withdraw USDT or TRX accordingly
             success = await withdraw_usdt_only(deposit)
