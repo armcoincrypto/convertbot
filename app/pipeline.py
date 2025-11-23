@@ -112,22 +112,21 @@ async def process_confirmed_deposit(deposit: Deposit) -> bool:
         await db.update_deposit_usdt(deposit.txid, usdt_amount, final_amount)
         
         if deposit.coin == CoinType.XMR:
-            # XMR: Already 10+ confs on MEXC, withdraw immediately
-            logger.info(f"💰 XMR detected - withdrawing immediately...")
-            
-            if settings.dry_run:
-                logger.info(f"🧪 DRY RUN: Would withdraw {final_amount:.2f} USDT")
+            # XMR: Already 10+ confs on MEXC, mark as SOLD and withdraw immediately
+            logger.info(f"💰 XMR detected - ready for immediate withdrawal...")
+            await db.update_deposit_status(deposit.txid, DepositStatus.SOLD)
+            logger.info(f"✅ Marked as SOLD - ready for withdrawal")
+
+            # Use the same withdrawal function as BTC/LTC/DASH
+            # This will check output_coin and withdraw USDT or TRX accordingly
+            success = await withdraw_usdt_only(deposit)
+            if success:
+                await db.update_deposit_status(deposit.txid, DepositStatus.WITHDRAWN)
+                logger.info(f"✅ XMR withdrawal complete!")
             else:
-                success, result = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
-                if success:
-                    withdraw_id = result.get('withdraw_id')
-                    logger.info(f"✅ Withdrawal successful: {withdraw_id}")
-                    await db.update_deposit_status(deposit.txid, DepositStatus.WITHDRAWN)
-                    await _notify_success(deposit, final_amount, "USDT", withdraw_id)
-                else:
-                    logger.error(f"❌ Withdrawal failed: {result}")
-                    await db.update_deposit_status(deposit.txid, DepositStatus.WITHDRAWAL_FAILED)
-                    return False
+                logger.error(f"❌ XMR withdrawal failed")
+                await db.update_deposit_status(deposit.txid, DepositStatus.WITHDRAWAL_FAILED)
+                return False
         else:
             # BTC/LTC/DASH: Mark as SOLD, withdraw after full confirmations
             await db.update_deposit_status(deposit.txid, DepositStatus.SOLD)
