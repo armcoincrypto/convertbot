@@ -82,7 +82,8 @@ async def process_confirmed_deposit(deposit: Deposit) -> bool:
                 if not success:
                     error_msg = trade_result.get('error', 'Unknown error')
                     logger.error(f"❌ Trade failed: {error_msg}")
-                    await _notify_error(deposit, f"Trade failed: {error_msg}")
+                    # NOTE: Don't notify user - TRADE_FAILED deposits are auto-retried every 2.5 min
+                    # User will be notified only when they actually receive funds
                     await db.update_deposit_status(deposit.txid, DepositStatus.TRADE_FAILED)
                     return False
                 

@@ -148,16 +148,7 @@ async def worker_cycle() -> Dict[str, Any]:
                         logger.info(f"🎉 FULLY CONFIRMED! {confs} >= {deposit.required_confs}")
                         await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED, confs)
                         confirmed += 1
-                        
-                        logger.info(f"📱 Sending confirmation notification to user {deposit.user_id}")
-                        await telegram.send_message(
-                            str(deposit.user_id),
-                            f"✅ Deposit confirmed!\n"
-                            f"TxID: {deposit.txid[:16]}...\n"
-                            f"Coin: {deposit.coin.value}\n"
-                            f"Confirmations: {confs}"
-                        )
-                        logger.info(f"✅ Notification sent successfully")
+                        # NOTE: No notification here - user will be notified when they actually receive funds
                     else:
                         logger.info(f"⏳ Still waiting: {confs}/{deposit.required_confs}")
                         await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMING, confs)
