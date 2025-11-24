@@ -447,38 +447,77 @@ async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     async with aiosqlite.connect("swapbot.db") as conn:
-        # Pending deposits
-        async with conn.execute("SELECT COUNT(*) FROM deposits WHERE status IN ('NEW', 'CONFIRMING', 'CONFIRMED', 'SOLD')") as cursor:
-            pending = (await cursor.fetchone())[0]
-
-        # Failed deposits
-        async with conn.execute("SELECT COUNT(*) FROM deposits WHERE status IN ('TRADE_FAILED', 'WITHDRAWAL_FAILED')") as cursor:
-            failed = (await cursor.fetchone())[0]
-
-        # Today's stats
         today = datetime.utcnow().date()
-        async with conn.execute("SELECT COUNT(*), COALESCE(SUM(usdt_amount), 0) FROM deposits WHERE DATE(inserted_at) = ? AND status = 'WITHDRAWN'", (str(today),)) as cursor:
-            today_swaps, today_volume = await cursor.fetchone()
+
+        # 1. Order Metrics (Core)
+        # Total orders created today
+        async with conn.execute(
+            "SELECT COUNT(*) FROM deposits WHERE DATE(inserted_at) = ?",
+            (str(today),)
+        ) as cursor:
+            orders_today = (await cursor.fetchone())[0]
+
+        # Total orders all-time
+        async with conn.execute("SELECT COUNT(*) FROM deposits") as cursor:
+            orders_total = (await cursor.fetchone())[0]
+
+        # Currently open (unresolved) orders
+        async with conn.execute(
+            "SELECT COUNT(*) FROM deposits WHERE status IN ('NEW', 'CONFIRMING', 'CONFIRMED', 'SOLD')"
+        ) as cursor:
+            orders_open = (await cursor.fetchone())[0]
+
+        # 2. User Metrics
+        # Active users today (unique users who created orders today)
+        async with conn.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM deposits WHERE DATE(inserted_at) = ?",
+            (str(today),)
+        ) as cursor:
+            users_today = (await cursor.fetchone())[0]
+
+        # Total registered users (unique users all-time)
+        async with conn.execute("SELECT COUNT(DISTINCT user_id) FROM deposits") as cursor:
+            users_total = (await cursor.fetchone())[0]
+
+        # 3. System / Worker Health
+        # Worker queue size (orders being processed)
+        async with conn.execute(
+            "SELECT COUNT(*) FROM deposits WHERE status IN ('NEW', 'CONFIRMING', 'CONFIRMED', 'SOLD', 'TRADE_FAILED', 'WITHDRAWAL_FAILED')"
+        ) as cursor:
+            worker_queue = (await cursor.fetchone())[0]
+
+        # Failed orders today
+        async with conn.execute(
+            "SELECT COUNT(*) FROM deposits WHERE DATE(inserted_at) = ? AND status IN ('TRADE_FAILED', 'WITHDRAWAL_FAILED', 'PROCESSING_ERROR')",
+            (str(today),)
+        ) as cursor:
+            failed_today = (await cursor.fetchone())[0]
 
         # Blacklist count
         async with conn.execute("SELECT COUNT(*) FROM blacklist") as cursor:
             blacklist_count = (await cursor.fetchone())[0]
 
+    # Mode: DRY_RUN or PRODUCTION
+    mode = "🧪 DRY_RUN (Testing)" if settings.dry_run else "🚀 PRODUCTION (Live)"
+
     message = (
-        "🔧 **Convertbot Debug Info**\n\n"
-        "📊 **Deposit Stats:**\n"
-        f"• Pending: {pending}\n"
-        f"• Failed (auto-retry): {failed}\n\n"
-        "📈 **Today's Activity:**\n"
-        f"• Swaps completed: {today_swaps}\n"
-        f"• Volume: ${today_volume:.2f}\n\n"
+        "🔧 **Convertbot Status**\n\n"
+        "📦 **Order Metrics:**\n"
+        f"• Orders today: {orders_today}\n"
+        f"• Orders all-time: {orders_total}\n"
+        f"• Currently open: {orders_open}\n"
+        f"• Failed today: {failed_today}\n\n"
+        "👥 **User Metrics:**\n"
+        f"• Active users today: {users_today}\n"
+        f"• Total registered users: {users_total}\n\n"
+        "⚙️ **System Health:**\n"
+        f"• Worker queue size: {worker_queue}\n"
+        f"• Mode: {mode}\n"
+        f"• Commission: {settings.commission_percent}%\n\n"
         "🔒 **Security:**\n"
         f"• Blacklisted TXIDs: {blacklist_count}\n"
-        f"• Rate limit: {RATE_LIMIT_COOLDOWN}s\n"
-        f"• Daily limit: {DAILY_SWAP_LIMIT} swaps, ${DAILY_VOLUME_LIMIT}\n\n"
-        "⚙️ **Config:**\n"
-        f"• DRY_RUN: {settings.dry_run}\n"
-        f"• Commission: {settings.commission_percent}%\n"
+        f"• Rate limit: {RATE_LIMIT_COOLDOWN}s cooldown\n"
+        f"• Daily limit: {DAILY_SWAP_LIMIT} swaps, ${DAILY_VOLUME_LIMIT}\n"
     )
 
     await update.message.reply_text(message, parse_mode="Markdown")
