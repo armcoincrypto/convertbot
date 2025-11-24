@@ -200,37 +200,24 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     info = COIN_INFO[coin_key]
     address = DEPOSIT_ADDRESSES[coin]
-    
-    keyboard = [[KeyboardButton("Ես ուղարկել եմ ✅")]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-    
+
     await update.message.reply_text(
-        f"Ձեր վճարման հասցեն:\n\n"
+        f"💰 Ձեր վճարման հասցեն:\n\n"
         f"<code>{address}</code>\n\n"
         f"💱 Դուք ընտրեցիք {info['name']} → {output_coin}\n"
         f"🌐 Ցանց: {info['network']}\n"
         f"✅ Հաստատումներ: {info['confs']}\n"
-        f"💰 Գանձարկվում է 3% միջնորդավճար\n"
         f"⏱ Միջին տևողություն: 20–30 րոպե\n\n"
-        f"Ուղարկելուց հետո սեղմեք «Ես ուղարկել եմ» կոճակը։",
+        f"📝 Ուղարկեք գործարքի HASH-ը (64 նիշ):\n\n"
+        f"Օրինակ:\n"
+        f"<code>a65b33369cf0bcd1b4e7a47f00e6536612210aeb0ddb4e6ac557c9f83d316545</code>",
         parse_mode="HTML",
-        reply_markup=reply_markup
+        reply_markup=ReplyKeyboardRemove()
     )
     return WAITING_TXID
 
 async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    
-    if "Ես ուղարկել եմ" in text:
-        await update.message.reply_text(
-            "Ստացվեց ✅\n\n"
-            "Խնդրում ենք ուղարկել գործարքի HASH-ը (64 նիշ):\n\n"
-            "Օրինակ:\n"
-            "<code>a65b33369cf0bcd1b4e7a47f00e6536612210aeb0ddb4e6ac557c9f83d316545</code>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return WAITING_TXID
 
     # Input normalization (handle whitespace, newlines, mixed case)
     clean_text = text.strip().lower()
