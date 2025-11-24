@@ -28,7 +28,9 @@ DAILY_SWAP_LIMIT = 10  # max swaps per day per user
 DAILY_VOLUME_LIMIT = 10000  # max $10,000 USD per day
 
 # Admin user IDs (configure these!)
-ADMIN_USER_IDS = [int(settings.admin_chat_id)] if hasattr(settings, 'admin_chat_id') and settings.admin_chat_id else []
+ADMIN_USER_IDS = [5109426501]  # Your Telegram User ID
+if hasattr(settings, 'admin_chat_id') and settings.admin_chat_id:
+    ADMIN_USER_IDS.append(int(settings.admin_chat_id))
 
 def check_rate_limit(user_id: int) -> tuple[bool, int]:
     """Check if user is rate limited. Returns (is_allowed, seconds_to_wait)"""
