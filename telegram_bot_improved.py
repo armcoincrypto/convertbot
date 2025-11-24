@@ -1,6 +1,8 @@
 """Telegram Bot with Dash to TRON support."""
 import asyncio
 import logging
+import time
+from datetime import datetime, timedelta
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from app.db import txid_exists, get_txid_owner
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
@@ -11,6 +13,75 @@ import aiosqlite
 import re
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# SECURITY: Rate Limiting & Anti-Abuse
+# ============================================================================
+
+# In-memory rate limiter (for production, use Redis)
+RATE_LIMIT_COOLDOWN = 30  # seconds between swap requests
+_last_request_time = {}  # user_id -> timestamp
+
+# Daily quotas
+DAILY_SWAP_LIMIT = 10  # max swaps per day per user
+DAILY_VOLUME_LIMIT = 10000  # max $10,000 USD per day
+
+# Admin user IDs (configure these!)
+ADMIN_USER_IDS = [int(settings.admin_chat_id)] if hasattr(settings, 'admin_chat_id') and settings.admin_chat_id else []
+
+def check_rate_limit(user_id: int) -> tuple[bool, int]:
+    """Check if user is rate limited. Returns (is_allowed, seconds_to_wait)"""
+    now = time.time()
+    last_time = _last_request_time.get(user_id, 0)
+    elapsed = now - last_time
+
+    if elapsed < RATE_LIMIT_COOLDOWN:
+        return False, int(RATE_LIMIT_COOLDOWN - elapsed)
+
+    _last_request_time[user_id] = now
+    return True, 0
+
+async def check_daily_quota(user_id: int) -> tuple[bool, int, int]:
+    """Check daily quota. Returns (is_allowed, swaps_today, volume_today)"""
+    today = datetime.utcnow().date()
+
+    async with aiosqlite.connect("swapbot.db") as conn:
+        # Count swaps today
+        async with conn.execute(
+            """SELECT COUNT(*), COALESCE(SUM(usdt_amount), 0)
+               FROM deposits
+               WHERE user_id = ?
+               AND DATE(inserted_at) = ?
+               AND status IN ('WITHDRAWN', 'SOLD', 'CONFIRMED')""",
+            (user_id, str(today))
+        ) as cursor:
+            row = await cursor.fetchone()
+            swaps_today = row[0] if row else 0
+            volume_today = row[1] if row else 0
+
+    is_allowed = swaps_today < DAILY_SWAP_LIMIT and volume_today < DAILY_VOLUME_LIMIT
+    return is_allowed, swaps_today, volume_today
+
+async def is_blacklisted(txid: str) -> tuple[bool, str]:
+    """Check if TXID is blacklisted. Returns (is_blacklisted, reason)"""
+    async with aiosqlite.connect("swapbot.db") as conn:
+        async with conn.execute(
+            "SELECT reason FROM blacklist WHERE txid = ?",
+            (txid,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return True, row[0]
+    return False, ""
+
+def is_admin(user_id: int) -> bool:
+    """Check if user is admin"""
+    return user_id in ADMIN_USER_IDS
+
+# ============================================================================
+# Conversation Handlers
+# ============================================================================
 
 CHOOSING_COIN, WAITING_TXID, WAITING_ADDRESS = range(3)
 
@@ -94,11 +165,39 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not coin:
         await update.message.reply_text("Խնդրում ենք ընտրել վերևի կոճակներից:")
         return CHOOSING_COIN
-    
+
+    # Security checks
+    user_id = update.effective_user.id
+
+    # 1. Rate limiting
+    is_allowed, wait_time = check_rate_limit(user_id)
+    if not is_allowed:
+        await update.message.reply_text(
+            f"⏱ Սպասեք {wait_time} վայրկյան\n\n"
+            f"🔒 Անվտանգության նկատառումներից ելնելով՝ նոր փոխանակումների միջև "
+            f"պետք է սպասել {RATE_LIMIT_COOLDOWN} վայրկյան։\n\n"
+            f"Սա կանխում է սպամը և համակարգի չարաշահումը։"
+        )
+        return CHOOSING_COIN
+
+    # 2. Daily quota check
+    quota_ok, swaps_today, volume_today = await check_daily_quota(user_id)
+    if not quota_ok:
+        await update.message.reply_text(
+            f"❌ Օրական սահմանաչափը գերազանցված է\n\n"
+            f"📊 Ձեր այսօրվա վիճակագրությունը:\n"
+            f"• Փոխանակումներ: {swaps_today}/{DAILY_SWAP_LIMIT}\n"
+            f"• Ընդհանուր ծավալ: ${volume_today:.2f}/${DAILY_VOLUME_LIMIT}\n\n"
+            f"🔒 Անվտանգության նկատառումներից ելնելով՝ մեկ օգտատերը կարող է\n"
+            f"կատարել առավելագույնը {DAILY_SWAP_LIMIT} փոխանակում օրական։\n\n"
+            f"⏰ Խնդրում ենք փորձել վաղը։"
+        )
+        return ConversationHandler.END
+
     context.user_data["coin"] = coin
     context.user_data["output_coin"] = output_coin
     context.user_data["coin_key"] = coin_key
-    
+
     info = COIN_INFO[coin_key]
     address = DEPOSIT_ADDRESSES[coin]
     
@@ -132,15 +231,30 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardRemove()
         )
         return WAITING_TXID
-    
+
+    # Input normalization (handle whitespace, newlines, mixed case)
     clean_text = text.strip().lower()
+    clean_text = clean_text.replace(" ", "").replace("\n", "").replace("\r", "")
+
     if re.match(r"^[a-f0-9]{64}$", clean_text):
-        # Check if TXID already exists
+        # Security check 1: Blacklist
+        is_blocked, reason = await is_blacklisted(clean_text)
+        if is_blocked:
+            await update.message.reply_text(
+                "🚫 ԱՐԳԵԼՎԱԾ ԳՈՐԾԱՐՔ\n\n"
+                "❌ Այս transaction hash-ը արգելափակված է մեր համակարգում։\n\n"
+                f"📝 Պատճառ: {reason}\n\n"
+                "⚠️ Եթե կարծում եք, որ սա սխալ է, խնդրում ենք կապվել օպերատորի հետ՝\n"
+                "📞 @Conodoperatorbot"
+            )
+            return ConversationHandler.END
+
+        # Security check 2: Duplicate detection
         import aiosqlite
         async with aiosqlite.connect("swapbot.db") as conn:
             async with conn.execute("SELECT txid FROM deposits WHERE txid = ?", (clean_text,)) as cursor:
                 existing = await cursor.fetchone()
-        
+
         if existing:
             await update.message.reply_text(
                 "⚠️ ՍԽԱԼ - Կրկնվող գործարք\n\n"
@@ -331,6 +445,175 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Կամ սեղմեք /start նոր փոխանակման համար։"
     )
 
+# ============================================================================
+# Admin Commands
+# ============================================================================
+
+async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: Show bot status and stats (NO SECRETS)"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+
+    async with aiosqlite.connect("swapbot.db") as conn:
+        # Pending deposits
+        async with conn.execute("SELECT COUNT(*) FROM deposits WHERE status IN ('NEW', 'CONFIRMING', 'CONFIRMED', 'SOLD')") as cursor:
+            pending = (await cursor.fetchone())[0]
+
+        # Failed deposits
+        async with conn.execute("SELECT COUNT(*) FROM deposits WHERE status IN ('TRADE_FAILED', 'WITHDRAWAL_FAILED')") as cursor:
+            failed = (await cursor.fetchone())[0]
+
+        # Today's stats
+        today = datetime.utcnow().date()
+        async with conn.execute("SELECT COUNT(*), COALESCE(SUM(usdt_amount), 0) FROM deposits WHERE DATE(inserted_at) = ? AND status = 'WITHDRAWN'", (str(today),)) as cursor:
+            today_swaps, today_volume = await cursor.fetchone()
+
+        # Blacklist count
+        async with conn.execute("SELECT COUNT(*) FROM blacklist") as cursor:
+            blacklist_count = (await cursor.fetchone())[0]
+
+    message = (
+        "🔧 **Convertbot Debug Info**\n\n"
+        "📊 **Deposit Stats:**\n"
+        f"• Pending: {pending}\n"
+        f"• Failed (auto-retry): {failed}\n\n"
+        "📈 **Today's Activity:**\n"
+        f"• Swaps completed: {today_swaps}\n"
+        f"• Volume: ${today_volume:.2f}\n\n"
+        "🔒 **Security:**\n"
+        f"• Blacklisted TXIDs: {blacklist_count}\n"
+        f"• Rate limit: {RATE_LIMIT_COOLDOWN}s\n"
+        f"• Daily limit: {DAILY_SWAP_LIMIT} swaps, ${DAILY_VOLUME_LIMIT}\n\n"
+        "⚙️ **Config:**\n"
+        f"• DRY_RUN: {settings.dry_run}\n"
+        f"• Commission: {settings.commission_percent}%\n"
+    )
+
+    await update.message.reply_text(message, parse_mode="Markdown")
+
+
+async def cmd_blacklist_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: Add TXID to blacklist"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage: /blacklist_add <txid> <reason>\n\n"
+            "Example:\n"
+            "/blacklist_add abc123...def456 Fraudulent transaction"
+        )
+        return
+
+    txid = context.args[0].strip().lower()
+    reason = " ".join(context.args[1:])
+
+    if not re.match(r"^[a-f0-9]{64}$", txid):
+        await update.message.reply_text("❌ Invalid TXID format (must be 64 hex characters)")
+        return
+
+    async with aiosqlite.connect("swapbot.db") as conn:
+        await conn.execute(
+            "INSERT OR REPLACE INTO blacklist (txid, reason, added_by, added_at) VALUES (?, ?, ?, ?)",
+            (txid, reason, user_id, datetime.utcnow().isoformat())
+        )
+        await conn.commit()
+
+    await update.message.reply_text(
+        f"✅ Blacklisted\n\n"
+        f"TXID: `{txid[:16]}...{txid[-16:]}`\n"
+        f"Reason: {reason}",
+        parse_mode="Markdown"
+    )
+
+
+async def cmd_blacklist_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: Remove TXID from blacklist"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+
+    if len(context.args) != 1:
+        await update.message.reply_text(
+            "Usage: /blacklist_remove <txid>\n\n"
+            "Example:\n"
+            "/blacklist_remove abc123...def456"
+        )
+        return
+
+    txid = context.args[0].strip().lower()
+
+    async with aiosqlite.connect("swapbot.db") as conn:
+        async with conn.execute("DELETE FROM blacklist WHERE txid = ?", (txid,)) as cursor:
+            await conn.commit()
+            deleted = cursor.rowcount
+
+    if deleted > 0:
+        await update.message.reply_text(f"✅ Removed `{txid[:16]}...` from blacklist", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ TXID not found in blacklist")
+
+
+async def cmd_force_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: Force retry a failed deposit"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Unauthorized")
+        return
+
+    if len(context.args) != 1:
+        await update.message.reply_text(
+            "Usage: /force_retry <txid>\n\n"
+            "Example:\n"
+            "/force_retry abc123...def456"
+        )
+        return
+
+    txid = context.args[0].strip().lower()
+
+    async with aiosqlite.connect("swapbot.db") as conn:
+        # Get current status
+        async with conn.execute("SELECT status FROM deposits WHERE txid = ?", (txid,)) as cursor:
+            row = await cursor.fetchone()
+
+        if not row:
+            await update.message.reply_text("❌ TXID not found")
+            return
+
+        current_status = row[0]
+
+        # Determine new status based on current status
+        if current_status in ('TRADE_FAILED', 'PROCESSING_ERROR'):
+            new_status = 'CONFIRMED'
+        elif current_status == 'WITHDRAWAL_FAILED':
+            new_status = 'SOLD'
+        else:
+            await update.message.reply_text(
+                f"❌ Cannot retry from status: {current_status}\n\n"
+                "Only TRADE_FAILED, WITHDRAWAL_FAILED, or PROCESSING_ERROR can be retried."
+            )
+            return
+
+        await conn.execute("UPDATE deposits SET status = ? WHERE txid = ?", (new_status, txid))
+        await conn.commit()
+
+    await update.message.reply_text(
+        f"✅ Forced retry\n\n"
+        f"TXID: `{txid[:16]}...`\n"
+        f"Status: {current_status} → {new_status}\n\n"
+        "Worker will pick it up in next cycle (~30s)",
+        parse_mode="Markdown"
+    )
+
 def main():
     application = Application.builder().token(settings.telegram_bot_token).build()
     
@@ -355,9 +638,15 @@ def main():
         check_button_handler
     ))
 
-    
+    # Admin commands
+    application.add_handler(CommandHandler("debug", cmd_debug))
+    application.add_handler(CommandHandler("blacklist_add", cmd_blacklist_add))
+    application.add_handler(CommandHandler("blacklist_remove", cmd_blacklist_remove))
+    application.add_handler(CommandHandler("force_retry", cmd_force_retry))
 
     print("🤖 Bot starting...")
+    print("🔒 Security features: Rate limiting, quotas, blacklist")
+    print("🛠  Admin commands: /debug, /blacklist_add, /blacklist_remove, /force_retry")
     print("📍 Supported swaps:")
     print("   • Bitcoin → USDT")
     print("   • Litecoin → USDT")

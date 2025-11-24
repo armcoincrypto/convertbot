@@ -29,7 +29,13 @@ def _row_to_deposit(row) -> "Deposit":
     except (KeyError, IndexError):
         output_coin = 'USDT'
 
-    return Deposit(
+    # Get attempt_count with fallback for backward compatibility
+    try:
+        attempt_count = row['attempt_count'] if row['attempt_count'] is not None else 0
+    except (KeyError, IndexError):
+        attempt_count = 0
+
+    deposit = Deposit(
         txid=row['txid'],
         coin=CoinType(row['coin']),
         user_id=row['user_id'],
@@ -42,6 +48,11 @@ def _row_to_deposit(row) -> "Deposit":
         final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
         output_coin=output_coin,
     )
+
+    # Add attempt_count as attribute (for backward compatibility with Deposit model)
+    deposit.attempt_count = attempt_count
+
+    return deposit
 
 
 async def init_db():
@@ -264,7 +275,7 @@ async def create_withdrawal(txid: str, user_id: int, coin: str, amount: float,
         logger.info(f"Created withdrawal record: {withdraw_id}")
 
 
-async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float, 
+async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float,
                               final_amount: float, fee: float, trade_order_id: str) -> None:
     """Record withdrawal details."""
     async with aiosqlite.connect(get_db_path()) as conn:
@@ -274,3 +285,15 @@ async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float,
         """, (txid, withdrawal_id, amount_usdt, final_amount, fee, trade_order_id))
         await conn.commit()
     logger.info(f"Added withdrawal info for {txid}")
+
+
+async def increment_attempt_count(txid: str) -> None:
+    """Increment retry attempt counter for a deposit"""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        await conn.execute("""
+            UPDATE deposits
+            SET attempt_count = COALESCE(attempt_count, 0) + 1
+            WHERE txid = ?
+        """, (txid,))
+        await conn.commit()
+    logger.info(f"Incremented attempt count for {txid}")

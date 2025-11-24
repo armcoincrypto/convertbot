@@ -51,27 +51,49 @@ async def cleanup_old_deposits():
 
 
 async def retry_failed_deposits():
-    """Retry deposits stuck in TRADE_FAILED or WITHDRAWAL_FAILED status"""
+    """Retry deposits stuck in TRADE_FAILED or WITHDRAWAL_FAILED status with attempt tracking"""
+    MAX_ATTEMPTS = 5
+
     try:
         logger.info("🔄 Checking for failed deposits to retry...")
 
         # Retry TRADE_FAILED deposits (sell failed)
         trade_failed = await db.get_deposits_by_status(DepositStatus.TRADE_FAILED)
         if trade_failed:
-            logger.info(f"🔁 Found {len(trade_failed)} TRADE_FAILED deposits, resetting to CONFIRMED...")
+            logger.info(f"🔁 Found {len(trade_failed)} TRADE_FAILED deposits, checking attempts...")
             for deposit in trade_failed:
-                logger.info(f"   → Retrying trade: {deposit.txid[:16]}... ({deposit.coin.value})")
+                # Get attempt count (handle deposits without attempt_count column)
+                attempt_count = getattr(deposit, 'attempt_count', 0) or 0
+
+                if attempt_count >= MAX_ATTEMPTS:
+                    logger.error(f"   ❌ Max attempts reached for {deposit.txid[:16]}... (attempted {attempt_count} times)")
+                    await db.update_deposit_status(deposit.txid, DepositStatus.PROCESSING_ERROR)
+                    # TODO: Notify admin
+                    continue
+
+                logger.info(f"   → Retrying trade: {deposit.txid[:16]}... (attempt {attempt_count + 1}/{MAX_ATTEMPTS})")
+                await db.increment_attempt_count(deposit.txid)
                 await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED)
-            logger.info(f"✅ Reset {len(trade_failed)} TRADE_FAILED deposits")
+            logger.info(f"✅ Processed {len(trade_failed)} TRADE_FAILED deposits")
 
         # Retry WITHDRAWAL_FAILED deposits (withdrawal failed)
         withdrawal_failed = await db.get_deposits_by_status(DepositStatus.WITHDRAWAL_FAILED)
         if withdrawal_failed:
-            logger.info(f"🔁 Found {len(withdrawal_failed)} WITHDRAWAL_FAILED deposits, resetting to SOLD...")
+            logger.info(f"🔁 Found {len(withdrawal_failed)} WITHDRAWAL_FAILED deposits, checking attempts...")
             for deposit in withdrawal_failed:
-                logger.info(f"   → Retrying withdrawal: {deposit.txid[:16]}... ({deposit.coin.value})")
+                # Get attempt count (handle deposits without attempt_count column)
+                attempt_count = getattr(deposit, 'attempt_count', 0) or 0
+
+                if attempt_count >= MAX_ATTEMPTS:
+                    logger.error(f"   ❌ Max attempts reached for {deposit.txid[:16]}... (attempted {attempt_count} times)")
+                    await db.update_deposit_status(deposit.txid, DepositStatus.PROCESSING_ERROR)
+                    # TODO: Notify admin
+                    continue
+
+                logger.info(f"   → Retrying withdrawal: {deposit.txid[:16]}... (attempt {attempt_count + 1}/{MAX_ATTEMPTS})")
+                await db.increment_attempt_count(deposit.txid)
                 await db.update_deposit_status(deposit.txid, DepositStatus.SOLD)
-            logger.info(f"✅ Reset {len(withdrawal_failed)} WITHDRAWAL_FAILED deposits")
+            logger.info(f"✅ Processed {len(withdrawal_failed)} WITHDRAWAL_FAILED deposits")
 
         if not trade_failed and not withdrawal_failed:
             logger.info("✅ No failed deposits to retry")
