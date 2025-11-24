@@ -143,8 +143,12 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if existing:
             await update.message.reply_text(
-                "❌ Այս գործարքը արդեն օգտագործվել է։\n\n"
-                "Խնդրում ենք ուղարկել ՆՈՐ գործարքի HASH:\n\n"
+                "⚠️ ՍԽԱԼ - Կրկնվող գործարք\n\n"
+                "❌ Այս transaction hash-ը արդեն օգտագործվել է մեր համակարգում։\n\n"
+                "🔒 Անվտանգության նկատառումներից ելնելով, յուրաքանչյուր "
+                "transaction hash կարող է օգտագործվել միայն ՄԵԿ ԱՆԳԱՄ։\n\n"
+                "Սա կանխում է կրկնակի վճարումները և խարդախությունը։\n\n"
+                "📝 Խնդրում ենք ուղարկել ՆՈՐ գործարքի HASH:\n\n"
                 "Օրինակ:\n"
                 "<code>6559ce2924b306bde3ca6433b92e9bac94821f587fda74ada758fd8477cf4f16</code>",
                 parse_mode="HTML"
@@ -188,16 +192,26 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     coin = context.user_data.get("coin")
     txid = context.user_data.get("txid")
     
-    # Check if TXID already used
+    # Check if TXID already used (security check)
     if await txid_exists(txid):
         owner_id = await get_txid_owner(txid)
         if owner_id == user_id:
             await update.message.reply_text(
-                "⚠️ Այս գործարքը արդեն օգտագործվել է։\nԽնդրում ենք ուղարկել ՆՈՐ գործարք"
+                "⚠️ ՍԽԱԼ - Կրկնվող գործարք\n\n"
+                "❌ Դուք արդեն օգտագործել եք այս transaction hash-ը։\n\n"
+                "🔒 Անվտանգության նկատառումներից ելնելով, յուրաքանչյուր "
+                "transaction hash կարող է օգտագործվել միայն ՄԵԿ ԱՆԳԱՄ։\n\n"
+                "Սա կանխում է կրկնակի վճարումները։\n\n"
+                "📝 Սկսեք նոր փոխանակում՝ /start"
             )
         else:
             await update.message.reply_text(
-                "❌ Այս գործարքն արդեն օգտագործված է այլ օգտատիրոջ կողմից"
+                "🚫 ՍԽԱԼ - Արգելված գործարք\n\n"
+                "❌ Այս transaction hash-ը արդեն օգտագործված է այլ օգտատիրոջ կողմից։\n\n"
+                "🔒 Յուրաքանչյուր transaction hash կարող է օգտագործվել միայն ՄԵԿ ԱՆԳԱՄ։\n\n"
+                "⚠️ Եթե դա ձեր գործարքն է, խնդրում ենք կապվել օպերատորի հետ՝\n"
+                "📞 @Conodoperatorbot\n\n"
+                "📝 Նոր փոխանակում՝ /start"
             )
         context.user_data.clear()
         return ConversationHandler.END
@@ -221,7 +235,7 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await conn.commit()
     
-    keyboard = [[KeyboardButton("🔄 Նոր փոխանակում /start"), KeyboardButton("📊 Ստուգել")]]
+    keyboard = [[KeyboardButton("🔄 Նոր փոխանակում /start"), KeyboardButton("📊 Ստուգել գործարքը")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
