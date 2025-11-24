@@ -257,61 +257,47 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Սկսելու համար սեղմեք /start"
         )
         return
-    
+
     message = "📊 Ձեր վերջին գործարքները:\n\n"
-    
-    for row in rows:
-        status_emoji = {
-            'NEW': '🆕',
-            'CONFIRMING': '⏳',
-            'CONFIRMED': '✅',
-            'WITHDRAWN': '🎉',
-            'TRADE_FAILED': '❌',
-        }.get(row[2], '❓')
-        
-        message += f"{status_emoji} {row[1]} → {row[6] or 'USDT'}\n"
-        message += f"   Status: {row[2]}\n"
-        message += f"   Confs: {row[3]}/{row[4]}\n"
-        if row[5]:
-            message += f"   Amount: {row[5]:.4f}\n"
-        message += "\n"
-    
-    await update.message.reply_text(message)
-    return
-    
+
     status_emoji = {
-        "NEW": "🆕",
-        "CONFIRMING": "⏳",
-        "CONFIRMED": "✅",
-        "SOLD": "💱",
-        "WITHDRAWN": "🎉",
-        "FAILED": "❌"
+        'NEW': '🆕',
+        'CONFIRMING': '⏳',
+        'CONFIRMED': '✅',
+        'SOLD': '💱',
+        'WITHDRAWN': '🎉',
+        'TRADE_FAILED': '⚠️',
+        'WITHDRAWAL_FAILED': '⚠️',
+        'PROCESSING_ERROR': '❌',
     }
-    
+
     status_text = {
-        "NEW": "Նոր",
-        "CONFIRMING": "Հաստատվում է",
-        "CONFIRMED": "Հաստատված",
-        "SOLD": "Վաճառված",
-        "WITHDRAWN": "Ավարտված",
-        "FAILED": "Սխալ"
+        'NEW': 'Սպասում է հաստատմանը',
+        'CONFIRMING': 'Հաստատվում է',
+        'CONFIRMED': 'Հաստատված',
+        'SOLD': 'Վաճառված',
+        'WITHDRAWN': 'Ավարտված ✅',
+        'TRADE_FAILED': 'Վերամշակվում է',
+        'WITHDRAWAL_FAILED': 'Վերամշակվում է',
+        'PROCESSING_ERROR': 'Սխալ',
     }
-    
-    keyboard = [[KeyboardButton("🔄 /start")]]
+
+    for row in rows:
+        txid, coin, status, confs, required, amount, output = row
+        emoji = status_emoji.get(status, '❓')
+        status_arm = status_text.get(status, status)
+
+        message += f"{emoji} {coin} → {output or 'USDT'}\n"
+        message += f"   Կարգավիճակ: {status_arm}\n"
+        message += f"   Հաստատումներ: {confs}/{required}\n"
+        if amount:
+            message += f"   Գումար: {amount:.4f} {coin}\n"
+        message += f"   TXID: <code>{txid[:16]}...</code>\n\n"
+
+    keyboard = [[KeyboardButton("🔄 Նոր փոխանակում /start")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
-    await update.message.reply_text(
-        f"📊 Գործարքի կարգավիճակ\n\n"
-        f"TXID: <code>{txid[:16]}...{txid[-8:]}</code>\n"
-        f"Մետաղադրամ: {coin}\n"
-        f"Կարգավիճակ: {status_emoji.get(status, '❓')} {status_text.get(status, status)}\n"
-        f"Հաստատումներ: {confs}/{required}\n\n"
-        f"{'✅ Շուտով կավարտվի!' if status in ['CONFIRMED', 'SOLD'] else '⏳ Սպասեք...' if status == 'CONFIRMING' else '🔍 Ստուգվում է...'}",
-        parse_mode="HTML",
-        reply_markup=reply_markup
-    )
-    
-    return CHOOSING_COIN
+
+    await update.message.reply_text(message, parse_mode="HTML", reply_markup=reply_markup)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(

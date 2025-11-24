@@ -50,27 +50,34 @@ async def cleanup_old_deposits():
             logger.info(f"🧹 Cleaned up {deleted} old unconfirmed deposits")
 
 
-async def retry_trade_failed_deposits():
-    """Retry deposits stuck in TRADE_FAILED status"""
+async def retry_failed_deposits():
+    """Retry deposits stuck in TRADE_FAILED or WITHDRAWAL_FAILED status"""
     try:
-        logger.info("🔄 Checking for TRADE_FAILED deposits to retry...")
-        
+        logger.info("🔄 Checking for failed deposits to retry...")
+
+        # Retry TRADE_FAILED deposits (sell failed)
         trade_failed = await db.get_deposits_by_status(DepositStatus.TRADE_FAILED)
-        
-        if not trade_failed:
-            logger.info("✅ No TRADE_FAILED deposits to retry")
-            return
-        
-        logger.info(f"🔁 Found {len(trade_failed)} TRADE_FAILED deposits, resetting to CONFIRMED...")
-        
-        for deposit in trade_failed:
-            logger.info(f"   → Retrying {deposit.txid[:16]}... ({deposit.coin.value})")
-            await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED)
-        
-        logger.info(f"✅ Reset {len(trade_failed)} deposits to CONFIRMED for retry")
-        
+        if trade_failed:
+            logger.info(f"🔁 Found {len(trade_failed)} TRADE_FAILED deposits, resetting to CONFIRMED...")
+            for deposit in trade_failed:
+                logger.info(f"   → Retrying trade: {deposit.txid[:16]}... ({deposit.coin.value})")
+                await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED)
+            logger.info(f"✅ Reset {len(trade_failed)} TRADE_FAILED deposits")
+
+        # Retry WITHDRAWAL_FAILED deposits (withdrawal failed)
+        withdrawal_failed = await db.get_deposits_by_status(DepositStatus.WITHDRAWAL_FAILED)
+        if withdrawal_failed:
+            logger.info(f"🔁 Found {len(withdrawal_failed)} WITHDRAWAL_FAILED deposits, resetting to SOLD...")
+            for deposit in withdrawal_failed:
+                logger.info(f"   → Retrying withdrawal: {deposit.txid[:16]}... ({deposit.coin.value})")
+                await db.update_deposit_status(deposit.txid, DepositStatus.SOLD)
+            logger.info(f"✅ Reset {len(withdrawal_failed)} WITHDRAWAL_FAILED deposits")
+
+        if not trade_failed and not withdrawal_failed:
+            logger.info("✅ No failed deposits to retry")
+
     except Exception as e:
-        logger.error(f"❌ Error retrying TRADE_FAILED deposits: {e}")
+        logger.error(f"❌ Error retrying failed deposits: {e}")
 
 
 async def worker_cycle() -> Dict[str, Any]:
@@ -309,24 +316,24 @@ async def worker_cycle() -> Dict[str, Any]:
 
 
 async def main():
-    """Main worker loop with auto-retry for TRADE_FAILED deposits"""
+    """Main worker loop with auto-retry for failed deposits"""
     logger.info("="*60)
     logger.info("🚀 WORKER STARTING")
     logger.info("="*60)
     logger.info(f"Mode: {'DRY_RUN' if settings.dry_run else 'LIVE'}")
     logger.info(f"Supported coins: BTC, LTC, DASH, XMR")
-    logger.info(f"Auto-retry: TRADE_FAILED deposits every 5 cycles (2.5 min)")
+    logger.info(f"Auto-retry: TRADE_FAILED and WITHDRAWAL_FAILED deposits every 5 cycles (2.5 min)")
     logger.info("="*60)
-    
+
     cycle_count = 0
-    
+
     while True:
         try:
             cycle_count += 1
-            
-            # Every 5th cycle (2.5 minutes), retry TRADE_FAILED deposits
+
+            # Every 5th cycle (2.5 minutes), retry failed deposits
             if cycle_count % 5 == 0:
-                await retry_trade_failed_deposits()
+                await retry_failed_deposits()
             
             logger.info(f"\n🔄 Starting worker cycle #{cycle_count}...")
             result = await worker_cycle()
