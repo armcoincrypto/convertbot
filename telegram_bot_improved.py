@@ -369,11 +369,30 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING_COIN
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /cancel command and Cancel button"""
+    context.user_data.clear()
+    keyboard = [
+        [KeyboardButton("₿ Bitcoin → USDT"), KeyboardButton("Ł Litecoin → USDT")],
+        [KeyboardButton("💎 Dash → USDT"), KeyboardButton("💎 Dash → TRON")],
+        [KeyboardButton("🔒 Monero → USDT")],
+        [KeyboardButton("📊 Ստdelays delays")],
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "❌ Չեղարկված է։ /start",
-        reply_markup=ReplyKeyboardRemove()
+        "❌ Չdelays:\n\nNew swap: /start",
+        reply_markup=reply_markup
     )
     return ConversationHandler.END
+
+
+async def operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /operator command - connect to support"""
+    await update.message.reply_text(
+        "📞 Contact Operator\n\n"
+        "For support, contact our operator:\n"
+        "@Conodoperatorbot\n\n"
+        "Or press /start for a new swap."
+    )
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -396,10 +415,18 @@ def main():
             WAITING_TXID: [MessageHandler(filters.TEXT & ~filters.COMMAND, waiting_for_txid)],
             WAITING_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_received)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            MessageHandler(filters.Regex("(?i)^cancel$"), cancel),
+        ],
     )
     
     application.add_handler(conv_handler)
+
+    # Add /operator command (works globally)
+    application.add_handler(CommandHandler("operator", operator))
+    application.add_handler(CommandHandler("support", operator))
+    application.add_handler(CommandHandler("help", operator))
 
     # Handler for check button (outside conversation)
     async def check_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
