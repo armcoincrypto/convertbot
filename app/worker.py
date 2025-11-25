@@ -10,6 +10,7 @@ from libs.explorer_client import explorer_client
 from app.validation import validate_amount
 from libs.mexc_client import MEXCClient
 from libs.telegram_client import TelegramClient
+from app.cleanup_manager import cleanup_manager
 
 logger = setup_logger(__name__)
 
@@ -336,6 +337,15 @@ async def main():
             # Every 5th cycle (2.5 minutes), retry TRADE_FAILED deposits
             if cycle_count % 5 == 0:
                 await retry_trade_failed_deposits()
+
+            # Every 10th cycle (5 minutes), run cleanup
+            if cycle_count % 10 == 0:
+                try:
+                    stats = await cleanup_manager.check_and_cleanup()
+                    if stats['cleaned'] > 0:
+                        logger.info(f"🧹 Cleanup: checked={stats['checked']}, cleaned={stats['cleaned']}")
+                except Exception as e:
+                    logger.error(f"❌ Cleanup error: {e}")
             
             logger.info(f"\n🔄 Starting worker cycle #{cycle_count}...")
             result = await worker_cycle()

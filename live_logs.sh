@@ -1,4 +1,7 @@
 #!/bin/bash
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Colors
 RED='\033[0;31m'
@@ -13,6 +16,18 @@ clear
 echo "╔═══════════════════════════════════════════════════════╗"
 echo "║     🔴 CONVERTBOT LIVE LOGS                          ║"
 echo "╚═══════════════════════════════════════════════════════╝"
+
+# Determine log directory
+if [ -d "/var/log/convertbot" ]; then
+    LOG_DIR="/var/log/convertbot"
+elif [ -d "logs" ]; then
+    LOG_DIR="logs"
+else
+    LOG_DIR="."
+fi
+
+WORKER_LOG="$LOG_DIR/worker.log"
+BOT_LOG="$LOG_DIR/bot.log"
 
 # Check if services are running
 WORKER_PID=$(ps aux | grep "app.worker" | grep -v grep | awk '{print $2}')
@@ -33,6 +48,7 @@ else
 fi
 
 echo ""
+echo "📂 Log directory: $LOG_DIR"
 echo "═══════════════════════════════════════════════════════"
 echo "📜 Last 30 lines, then live updates..."
 echo "═══════════════════════════════════════════════════════"
@@ -62,11 +78,11 @@ colorize() {
 }
 
 # Show last 30 lines from both logs
-(tail -30 worker.log 2>/dev/null; tail -30 bot.log 2>/dev/null) | tail -30 | colorize
+(tail -30 "$WORKER_LOG" 2>/dev/null; tail -30 "$BOT_LOG" 2>/dev/null) | tail -30 | colorize
 
 echo ""
 echo "━━━━━━━━━━━━━━ LIVE UPDATES BELOW ━━━━━━━━━━━━━━"
 echo ""
 
 # Now follow both logs
-tail -f worker.log bot.log 2>/dev/null | colorize
+tail -f "$WORKER_LOG" "$BOT_LOG" 2>/dev/null | colorize

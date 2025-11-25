@@ -1,4 +1,8 @@
 #!/bin/bash
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 clear
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║           🔍 CONVERTBOT - SYSTEM STATUS                    ║"
@@ -17,17 +21,19 @@ sqlite3 swapbot.db "SELECT substr(inserted_at,12,8) as time, substr(txid,1,12), 
 echo ""
 
 echo "🔴 Any Errors:"
-tail -20 worker.log | grep "ERROR\|Exception\|Failed" | tail -5
+tail -20 logs/worker.log 2>/dev/null | grep "ERROR\|Exception\|Failed" | tail -5
 echo ""
 
 echo "✅ Last Success:"
-tail -50 worker.log | grep "✅.*complete\|WITHDRAWN" | tail -1
+tail -50 logs/worker.log 2>/dev/null | grep "✅.*complete\|WITHDRAWN" | tail -1
 echo ""
 
 echo "💵 MEXC Balances:"
+source venv/bin/activate
 python3 << 'PY'
 import sys
-sys.path.insert(0, '/Users/gev/Convertbot')
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) or '.')
 from libs.mexc_client import MEXCClient
 from app.config import settings
 mexc = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret)

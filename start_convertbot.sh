@@ -1,5 +1,7 @@
 #!/bin/bash
-cd /Users/gev/Convertbot
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 source venv/bin/activate
 
 echo "🚀 Starting Convertbot services..."
@@ -10,12 +12,12 @@ pkill -f "app.worker"
 sleep 2
 
 # Start bot
-nohup python telegram_bot_improved.py > bot.log 2>&1 &
+nohup python telegram_bot_improved.py > logs/bot.log 2>&1 &
 BOT_PID=$!
 echo "✅ Bot started (PID: $BOT_PID)"
 
 # Start worker
-nohup python -m app.worker > worker.log 2>&1 &
+nohup python -m app.worker > logs/worker.log 2>&1 &
 WORKER_PID=$!
 echo "✅ Worker started (PID: $WORKER_PID)"
 

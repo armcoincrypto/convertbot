@@ -1,6 +1,8 @@
 """Telegram Bot with Dash to TRON support."""
 import asyncio
 import logging
+from datetime import datetime, timedelta
+from collections import defaultdict
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from app.db import txid_exists, get_txid_owner
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
@@ -11,6 +13,50 @@ import aiosqlite
 import re
 
 logging.basicConfig(level=logging.INFO)
+
+# Rate limiting storage (in-memory, resets on restart)
+user_last_swap = {}  # user_id -> datetime of last swap
+user_daily_swaps = defaultdict(list)  # user_id -> list of swap timestamps today
+
+
+def check_rate_limit(user_id: int) -> tuple[bool, str]:
+    """Check if user is within rate limits.
+
+    Returns:
+        (is_allowed, error_message)
+    """
+    now = datetime.now()
+
+    # Check cooldown between swaps
+    if user_id in user_last_swap:
+        elapsed = (now - user_last_swap[user_id]).total_seconds()
+        if elapsed < settings.rate_limit_cooldown:
+            remaining = int(settings.rate_limit_cooldown - elapsed)
+            return False, f"Cooldown\n\nPlease wait {remaining} seconds before next swap."
+
+    # Clean old daily entries (older than 24h)
+    today_start = now - timedelta(hours=24)
+    user_daily_swaps[user_id] = [
+        ts for ts in user_daily_swaps[user_id]
+        if ts > today_start
+    ]
+
+    # Check daily swap limit
+    if len(user_daily_swaps[user_id]) >= settings.daily_swap_limit:
+        return False, (
+            f"Delays Daily Limit\n\n"
+            f"You reached {settings.daily_swap_limit} swaps today.\n"
+            f"Try again tomorrow."
+        )
+
+    return True, ""
+
+
+def record_swap(user_id: int):
+    """Record a new swap for rate limiting."""
+    now = datetime.now()
+    user_last_swap[user_id] = now
+    user_daily_swaps[user_id].append(now)
 
 CHOOSING_COIN, WAITING_TXID, WAITING_ADDRESS = range(3)
 
@@ -176,7 +222,13 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     address = update.message.text.strip()
     user_id = update.message.from_user.id
-    
+
+    # Check rate limit before processing swap
+    is_allowed, error_msg = check_rate_limit(user_id)
+    if not is_allowed:
+        await update.message.reply_text(f"Rate limit reached\n\n{error_msg}")
+        return ConversationHandler.END
+
     if not (address.startswith("T") and len(address) == 34):
         await update.message.reply_text(
             "❌ Սխալ հասցե։\n\n"
@@ -220,7 +272,10 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (txid, coin, user_id, info['confs'], target_address, output_coin)
         )
         await conn.commit()
-    
+
+    # Record swap for rate limiting
+    record_swap(user_id)
+
     keyboard = [[KeyboardButton("🔄 Նոր փոխանակում /start"), KeyboardButton("📊 Ստուգել")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
