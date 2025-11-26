@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /Users/gev/Convertbot
+cd "$(dirname "$0")"
 source venv/bin/activate
 
 echo "🚀 Starting Convertbot services..."

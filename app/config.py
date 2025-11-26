@@ -4,7 +4,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False, "extra": "ignore"}
     
-    database_url: str = "postgresql://localhost/swapbot"
+    database_url: str = "sqlite:///swapbot.db"
     mexc_api_key: str
     mexc_api_secret: str
     telegram_bot_token: str

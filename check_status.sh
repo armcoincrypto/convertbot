@@ -27,7 +27,7 @@ echo ""
 echo "💵 MEXC Balances:"
 python3 << 'PY'
 import sys
-sys.path.insert(0, '/Users/gev/Convertbot')
+sys.path.insert(0, '.')
 from libs.mexc_client import MEXCClient
 from app.config import settings
 mexc = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret)
