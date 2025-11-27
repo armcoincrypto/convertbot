@@ -151,26 +151,48 @@ async def worker_cycle() -> Dict[str, Any]:
                         CoinType.DASH: 7,  # Sell early at 7, withdraw at 12
                         CoinType.XMR: 1,   # XMR uses MEXC deposit history
                     }.get(deposit.coin, 2)
-                    
+
                     if confs >= EARLY_SELL_CONFS and deposit.status == DepositStatus.CONFIRMING:
-                        logger.info(f"💰 EARLY SELL! Processing at {confs} confs (price protection)")
-                        await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED, confs)
+                        # CRITICAL: Verify MEXC has credited the coin BEFORE marking CONFIRMED
+                        coin_str = deposit.coin.value if hasattr(deposit.coin, 'value') else str(deposit.coin)
+                        logger.info(f"🔍 Checking if {coin_str} is credited on MEXC...")
+                        is_on_mexc, mexc_amount = mexc.verify_deposit_on_mexc(coin_str, deposit.txid)
+
+                        if is_on_mexc and mexc_amount:
+                            logger.info(f"✅ MEXC credited: {mexc_amount} {coin_str}")
+                            logger.info(f"💰 EARLY SELL! Processing at {confs} confs (price protection)")
+                            await db.update_deposit_amount(deposit.txid, mexc_amount)
+                            await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED, confs)
+                        else:
+                            logger.info(f"⏳ Not yet on MEXC, waiting... ({confs} confs)")
+                            await db.update_deposit_confs(deposit.txid, confs)
                         continue  # Skip further processing this cycle
                     
                     elif confs >= deposit.required_confs:
-                        logger.info(f"🎉 FULLY CONFIRMED! {confs} >= {deposit.required_confs}")
-                        await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED, confs)
-                        confirmed += 1
-                        
-                        logger.info(f"📱 Sending confirmation notification to user {deposit.user_id}")
-                        await telegram.send_message(
-                            str(deposit.user_id),
-                            f"✅ Deposit confirmed!\n"
-                            f"TxID: {deposit.txid[:16]}...\n"
-                            f"Coin: {deposit.coin.value}\n"
-                            f"Confirmations: {confs}"
-                        )
-                        logger.info(f"✅ Notification sent successfully")
+                        # CRITICAL: Verify MEXC has credited the coin BEFORE marking CONFIRMED
+                        coin_str = deposit.coin.value if hasattr(deposit.coin, 'value') else str(deposit.coin)
+                        logger.info(f"🔍 Full confs reached ({confs}), checking MEXC...")
+                        is_on_mexc, mexc_amount = mexc.verify_deposit_on_mexc(coin_str, deposit.txid)
+
+                        if is_on_mexc and mexc_amount:
+                            logger.info(f"✅ MEXC credited: {mexc_amount} {coin_str}")
+                            logger.info(f"🎉 FULLY CONFIRMED! {confs} >= {deposit.required_confs}")
+                            await db.update_deposit_amount(deposit.txid, mexc_amount)
+                            await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED, confs)
+                            confirmed += 1
+
+                            logger.info(f"📱 Sending confirmation notification to user {deposit.user_id}")
+                            await telegram.send_message(
+                                str(deposit.user_id),
+                                f"✅ Deposit confirmed!\n"
+                                f"TxID: {deposit.txid[:16]}...\n"
+                                f"Coin: {deposit.coin.value}\n"
+                                f"Confirmations: {confs}"
+                            )
+                            logger.info(f"✅ Notification sent successfully")
+                        else:
+                            logger.info(f"⏳ Full confs but not yet on MEXC, waiting...")
+                            await db.update_deposit_confs(deposit.txid, confs)
                     else:
                         logger.info(f"⏳ Still waiting: {confs}/{deposit.required_confs}")
                         await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMING, confs)
