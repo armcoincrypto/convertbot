@@ -176,18 +176,18 @@ async def _notify_error(deposit: Deposit, error: str):
 
 
 async def withdraw_usdt_only(deposit: Deposit) -> bool:
-    """Withdraw USDT for an already-sold deposit"""
+    """Withdraw USDT for an already-sold deposit (BTC/LTC/DASH after full confirmations)"""
     from app.config import settings
     from libs.mexc_client import MEXCClient
     from libs.telegram_client import TelegramClient
     import asyncio
-    
+
     logger.info(f"📤 Withdrawing USDT for {deposit.txid[:16]}...")
-    
+
     try:
-        mexc = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret)
-        telegram = TelegramClient(settings.telegram_bot_token, settings.admin_chat_id)
-        
+        mexc_client = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret)
+        telegram_client = TelegramClient(settings.telegram_bot_token, settings.admin_chat_id)
+
         # Get stored USDT amount from database
         if deposit.usdt_amount and deposit.usdt_amount > 0:
             usdt_amount = deposit.usdt_amount
@@ -197,33 +197,31 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
             # Fallback: shouldn't happen, but just in case
             logger.error(f"❌ No stored USDT amount! This shouldn't happen.")
             return False
-        
+
         logger.info(f"💵 Final withdrawal: {final_amount:.2f} USDT")
-        
+
         if settings.dry_run:
             logger.info(f"🧪 DRY RUN: Would withdraw {final_amount:.2f} USDT")
             return True
-        
+
         # Actual withdrawal
-        withdrawal_id = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
-        
-        if withdrawal_id:
-            logger.info(f"✅ Withdrawal successful: {withdrawal_id}")
-            
-            # Notify user
-            await telegram.send_message(
-                str(deposit.user_id),
-                f"✅ Withdrawal complete!\n"
-                f"Amount: {final_amount:.2f} USDT\n"
-                f"Address: {deposit.target_address[:10]}...\n"
-                f"Withdrawal ID: {withdrawal_id}"
-            )
-            
+        success, result = mexc_client.withdraw_usdt_trc20(deposit.target_address, final_amount)
+
+        if success:
+            withdraw_id = result.get('withdraw_id', 'N/A')
+            logger.info(f"✅ Withdrawal successful: {withdraw_id}")
+
+            # Use same notification format as XMR (consistent for all pairs)
+            await _notify_success(deposit, final_amount, "USDT", withdraw_id)
+
             return True
         else:
-            logger.error("❌ Withdrawal failed")
+            error_msg = result.get('error', 'Unknown error')
+            logger.error(f"❌ Withdrawal failed: {error_msg}")
+            await _notify_error(deposit, f"Withdrawal failed: {error_msg}")
             return False
-            
+
     except Exception as e:
         logger.error(f"💥 Withdrawal error: {e}")
+        await _notify_error(deposit, f"Withdrawal error: {str(e)}")
         return False

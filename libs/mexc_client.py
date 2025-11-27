@@ -121,72 +121,125 @@ class MEXCClient:
         except:
             return None
 
+    def check_coin_balance(self, coin: str, required_amount: float) -> Tuple[bool, float]:
+        """Check if we have enough balance of a coin to sell.
+        Returns (has_enough, available_balance)"""
+        coin_str = coin.value if hasattr(coin, 'value') else str(coin)
+        balances = self.get_account_balance()
+        available = balances.get(coin_str, {}).get('free', 0)
+        return available >= required_amount, available
+
+    def verify_deposit_on_mexc(self, coin: str, txid: str) -> Tuple[bool, Optional[float]]:
+        """Check if a specific deposit has been credited on MEXC.
+        Returns (is_credited, amount)"""
+        coin_str = coin.value if hasattr(coin, 'value') else str(coin)
+        try:
+            deposits = self.get_deposit_history(coin=coin_str, limit=100)
+            for d in deposits:
+                if d.get('txId') == txid:
+                    # Status 5 = completed/credited, 6 = credited
+                    if d.get('status') in [5, 6]:
+                        return True, float(d.get('amount', 0))
+                    else:
+                        print(f"   ⏳ Deposit found but status={d.get('status')} (not credited yet)")
+                        return False, float(d.get('amount', 0))
+            return False, None
+        except Exception as e:
+            print(f"❌ Error checking deposit: {e}")
+            return False, None
+
+    def _check_response_error(self, data: Dict) -> Tuple[bool, Optional[str]]:
+        """Check if MEXC response contains an error code.
+        Returns (is_error, error_message)"""
+        # MEXC returns error codes in JSON even with HTTP 200
+        error_code = data.get('code')
+        if error_code and error_code != 0:
+            error_msg = data.get('msg', 'Unknown error')
+            return True, f"MEXC Error {error_code}: {error_msg}"
+        return False, None
+
     def sell_crypto_to_usdt(self, coin: str, amount: float) -> Tuple[bool, Dict]:
         """Sell crypto for USDT (with BTC special handling)"""
         coin_str = coin.value if hasattr(coin, 'value') else str(coin)
-        
+
+        # CRITICAL: Check if we have enough balance BEFORE attempting to sell
+        has_balance, available = self.check_coin_balance(coin_str, amount)
+        if not has_balance:
+            error = f"Insufficient {coin_str} balance: have {available}, need {amount}"
+            print(f"❌ {error}")
+            return False, {'error': error, 'error_code': 'INSUFFICIENT_BALANCE', 'available': available}
+
+        print(f"✅ Balance check passed: {available} {coin_str} available (need {amount})")
+
         # Special handling for BTC (not allowed on MEXC API)
         if coin_str == 'BTC':
             print(f"🔄 BTC not allowed on API, converting BTC → USDC → USDT")
-            
+
             # Step 1: Sell BTC for USDC
             success1, result1 = self._trade_pair('BTCUSDC', amount, 'SELL')
             if not success1:
                 return False, result1
-            
+
             usdc_amount = result1.get('received', 0)
             print(f"   ✅ Step 1: {amount} BTC → {usdc_amount:.2f} USDC")
-            
+
             # Step 2: Sell USDC for USDT
             time.sleep(1)
             success2, result2 = self._trade_pair('USDCUSDT', usdc_amount, 'SELL')
             if not success2:
                 return False, result2
-            
+
             usdt_amount = result2.get('received', 0)
             print(f"   ✅ Step 2: {usdc_amount:.2f} USDC → {usdt_amount:.2f} USDT")
-            
+
             return True, {
                 'order_id': f"{result1.get('order_id')}+{result2.get('order_id')}",
                 'usdt_received': usdt_amount,
                 'avg_price': usdt_amount / amount if amount > 0 else 0,
                 'two_step': True
             }
-        
+
         symbol = f"{coin_str}USDT"
-        
+
         try:
             precision = {'BTC': 6, 'LTC': 4, 'DASH': 2, 'XMR': 3, 'TRX': 2}
             decimals = precision.get(coin_str, 6)
-            # Use 99% to avoid rounding issues
-            amount = round(amount * 0.99, decimals)
-            
+
+            # Quantize amount first, then apply 99% (only once!)
+            amount = self._quantize_amount(coin_str, amount * 0.99)
+
             balances_before = self.get_account_balance()
             usdt_before = balances_before.get('USDT', {}).get('free', 0)
-            
+
             timestamp = str(int(time.time() * 1000))
             params = f"quantity={amount}&recvWindow=5000&side=SELL&symbol={symbol}&timestamp={timestamp}&type=MARKET"
             signature = self._sign(params)
-            
+
             url = f"{self.base_url}/api/v3/order?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
-            
-            amount = self._quantize_amount(coin_str, amount)
+
             print(f"📤 Placing SELL order: {amount} {coin_str} → {symbol}")
             response = requests.post(url, headers=headers)
-            
+
             if response.status_code == 200:
                 data = response.json()
+
+                # CRITICAL: Check for error codes in JSON response
+                is_error, error_msg = self._check_response_error(data)
+                if is_error:
+                    print(f"❌ Trade failed: {error_msg}")
+                    return False, {'error': error_msg}
+
                 order_id = data.get('orderId', 'N/A')
-                
+
                 time.sleep(2)
-                
+
                 balances_after = self.get_account_balance()
                 usdt_after = balances_after.get('USDT', {}).get('free', 0)
                 usdt_received = usdt_after - usdt_before
-                
+
                 print(f"✅ Sold {amount} {coin_str} → {usdt_received:.2f} USDT")
-                
+
                 return True, {
                     'order_id': order_id,
                     'usdt_received': usdt_received,
@@ -196,7 +249,7 @@ class MEXCClient:
                 error = f"{response.status_code}: {response.text}"
                 print(f"❌ Trade failed: {error}")
                 return False, {'error': error}
-                
+
         except Exception as e:
             error = str(e)
             print(f"❌ Exception: {error}")
@@ -317,26 +370,33 @@ class MEXCClient:
             }
             decimals = precision.get(symbol, 6)
             amount = round(amount, decimals)
-            
+
             balances_before = self.get_account_balance()
-            
+
             timestamp = str(int(time.time() * 1000))
             params = f"quantity={amount}&recvWindow=5000&side={side}&symbol={symbol}&timestamp={timestamp}&type=MARKET"
             signature = self._sign(params)
-            
+
             url = f"{self.base_url}/api/v3/order?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
-            
+
             response = requests.post(url, headers=headers)
-            
+
             if response.status_code == 200:
                 data = response.json()
+
+                # CRITICAL: Check for error codes in JSON response
+                is_error, error_msg = self._check_response_error(data)
+                if is_error:
+                    print(f"❌ Trade pair failed: {error_msg}")
+                    return False, {'error': error_msg}
+
                 order_id = data.get('orderId', 'N/A')
-                
+
                 time.sleep(2)
-                
+
                 balances_after = self.get_account_balance()
-                
+
                 # Figure out what we received
                 received = 0
                 if side == 'SELL':
@@ -348,13 +408,13 @@ class MEXCClient:
                         quote = "USDC"
                     else:
                         quote = "USDT"  # fallback
-                    
+
                     before_balance = balances_before.get(quote, {}).get("free", 0)
                     after_balance = balances_after.get(quote, {}).get("free", 0)
                     received = after_balance - before_balance
-                    
+
                     print(f"   💰 Balance change: {quote} {before_balance:.8f} → {after_balance:.8f} (received: {received:.8f})")
-                
+
                 return True, {
                     'order_id': order_id,
                     'received': received
@@ -362,6 +422,6 @@ class MEXCClient:
             else:
                 error = f"{response.status_code}: {response.text}"
                 return False, {'error': error}
-                
+
         except Exception as e:
             return False, {'error': str(e)}

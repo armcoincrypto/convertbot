@@ -14,13 +14,26 @@ logging.basicConfig(level=logging.INFO)
 
 CHOOSING_COIN, WAITING_TXID, WAITING_ADDRESS = range(3)
 
-DEPOSIT_ADDRESSES = {
-    "BTC": "33vFCeDJXdEPTnWFEyy5tRy85iQo1oBtw4",
-    "LTC": "ltc1qdx26fhhma5x0kwld5l0dxrwc0mrcygl6fnvnxp",
-    "DASH": "Xdiuzho4EhWWzEEDbNzbxYpt55DRDETgD9",
-    "XMR": "88jVTyDDAJzWyaamiGWaAyXn487o53v7hgzPY46qAwBEBCJsvXoBVadgq1yj7kuBrD6sKo3v49twPCtJ5vozbTqW3HMqWb7",
-    "USDT": "TFqUpY6Xnk6QLaHxBr5hTnuHLfAPgLMLQF",
-}
+# Get deposit addresses from config (centralized, not hardcoded)
+def get_deposit_addresses():
+    """Get deposit addresses from config - ensures consistency with worker"""
+    return {
+        "BTC": settings.addr_btc,
+        "LTC": settings.addr_ltc,
+        "DASH": settings.addr_dash,
+        "XMR": settings.addr_xmr,
+        "USDT": "TFqUpY6Xnk6QLaHxBr5hTnuHLfAPgLMLQF",  # USDT is always TRC20
+    }
+
+# Lazy-loaded to allow settings to initialize
+DEPOSIT_ADDRESSES = None
+
+def get_address(coin: str) -> str:
+    """Get deposit address for a coin"""
+    global DEPOSIT_ADDRESSES
+    if DEPOSIT_ADDRESSES is None:
+        DEPOSIT_ADDRESSES = get_deposit_addresses()
+    return DEPOSIT_ADDRESSES.get(coin, "")
 
 COIN_INFO = {
     "BTC": {"name": "Bitcoin", "network": "Bitcoin", "confs": 2, "to": "USDT"},
@@ -100,7 +113,7 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["coin_key"] = coin_key
     
     info = COIN_INFO[coin_key]
-    address = DEPOSIT_ADDRESSES[coin]
+    address = get_address(coin)
     
     keyboard = [[KeyboardButton("Ես ուղարկել եմ ✅")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)

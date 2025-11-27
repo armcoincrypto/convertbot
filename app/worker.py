@@ -51,24 +51,38 @@ async def cleanup_old_deposits():
 
 
 async def retry_trade_failed_deposits():
-    """Retry deposits stuck in TRADE_FAILED status"""
+    """Retry deposits stuck in TRADE_FAILED status - only if deposit is on MEXC"""
     try:
         logger.info("🔄 Checking for TRADE_FAILED deposits to retry...")
-        
+
         trade_failed = await db.get_deposits_by_status(DepositStatus.TRADE_FAILED)
-        
+
         if not trade_failed:
             logger.info("✅ No TRADE_FAILED deposits to retry")
             return
-        
-        logger.info(f"🔁 Found {len(trade_failed)} TRADE_FAILED deposits, resetting to CONFIRMED...")
-        
+
+        logger.info(f"🔁 Found {len(trade_failed)} TRADE_FAILED deposits, checking MEXC...")
+
+        retried = 0
         for deposit in trade_failed:
-            logger.info(f"   → Retrying {deposit.txid[:16]}... ({deposit.coin.value})")
-            await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED)
-        
-        logger.info(f"✅ Reset {len(trade_failed)} deposits to CONFIRMED for retry")
-        
+            coin_str = deposit.coin.value if hasattr(deposit.coin, 'value') else str(deposit.coin)
+
+            # CRITICAL: Only retry if deposit is actually credited on MEXC
+            logger.info(f"   → Checking {deposit.txid[:16]}... ({coin_str})")
+            is_on_mexc, mexc_amount = mexc.verify_deposit_on_mexc(coin_str, deposit.txid)
+
+            if is_on_mexc and mexc_amount:
+                logger.info(f"   ✅ Deposit is on MEXC ({mexc_amount} {coin_str}), retrying...")
+                await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED)
+                retried += 1
+            else:
+                logger.warning(f"   ⏳ Deposit NOT on MEXC yet, skipping retry")
+
+        if retried > 0:
+            logger.info(f"✅ Reset {retried}/{len(trade_failed)} deposits to CONFIRMED for retry")
+        else:
+            logger.info(f"⏳ No deposits ready for retry (waiting for MEXC credit)")
+
     except Exception as e:
         logger.error(f"❌ Error retrying TRADE_FAILED deposits: {e}")
 
@@ -166,9 +180,25 @@ async def worker_cycle() -> Dict[str, Any]:
 
                 elif deposit.status == DepositStatus.CONFIRMED:
                     logger.info(f"💰 Deposit is CONFIRMED, fetching amount...")
-                    
-                    # Get amount from blockchain if not set
-                    onchain_amount = deposit.onchain_amount
+
+                    # CRITICAL: Verify deposit is actually credited on MEXC before selling!
+                    logger.info(f"🔍 Verifying deposit is credited on MEXC...")
+                    coin_str = deposit.coin.value if hasattr(deposit.coin, 'value') else str(deposit.coin)
+                    is_on_mexc, mexc_amount = mexc.verify_deposit_on_mexc(coin_str, deposit.txid)
+
+                    if is_on_mexc and mexc_amount:
+                        logger.info(f"✅ Deposit verified on MEXC: {mexc_amount} {coin_str}")
+                        # Use the amount from MEXC as it's authoritative
+                        onchain_amount = mexc_amount
+                        await db.update_deposit_amount(deposit.txid, onchain_amount)
+                    else:
+                        # Deposit not yet credited on MEXC - wait
+                        logger.warning(f"⏳ Deposit not yet credited on MEXC, waiting...")
+                        logger.info(f"   TXID: {deposit.txid[:32]}...")
+                        logger.info(f"   Will retry in next cycle")
+                        continue
+
+                    # Get amount from blockchain if not set (fallback for non-MEXC verification)
                     if not onchain_amount or onchain_amount <= 0:
                         # Get the deposit address for this coin from config
                         deposit_address = {
@@ -177,7 +207,7 @@ async def worker_cycle() -> Dict[str, Any]:
                             'DASH': settings.addr_dash,
                             'XMR': settings.addr_xmr
                         }.get(deposit.coin)
-                        
+
                         onchain_amount = await explorer_client.get_transaction_amount(
                             CoinType(deposit.coin),
                             deposit.txid,
