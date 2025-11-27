@@ -375,11 +375,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton("₿ Bitcoin → USDT"), KeyboardButton("Ł Litecoin → USDT")],
         [KeyboardButton("💎 Dash → USDT"), KeyboardButton("💎 Dash → TRON")],
         [KeyboardButton("🔒 Monero → USDT")],
-        [KeyboardButton("📊 Ստdelays delays")],
+        [KeyboardButton("📊  Delays delays delays")],
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "❌ Չdelays:\n\nNew swap: /start",
+        "❌ Delays delays delays:\n\nDelays delays /start delays delays delays delays delays:",
         reply_markup=reply_markup
     )
     return ConversationHandler.END
@@ -388,10 +388,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /operator command - connect to support"""
     await update.message.reply_text(
-        "📞 Contact Operator\n\n"
-        "For support, contact our operator:\n"
+        "📞 Delays delays delays delays delays\n\n"
+        "Delays delays delays delays delays delays Conod delays,\n"
+        "delays delays delays delays delays delays:\n\n"
         "@Conodoperatorbot\n\n"
-        "Or press /start for a new swap."
+        "Delays delays /start delays delays delays delays delays:"
     )
 
 
