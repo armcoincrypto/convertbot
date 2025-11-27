@@ -108,8 +108,8 @@ class MEXCClient:
             
             if response.status_code == 200:
                 deposits = response.json()
-                # Filter successful deposits only
-                return [d for d in deposits if d.get("status") in [1, 5, 6]]  # 5=completed, 1=pending, 6=credited
+                # Filter deposits: 1=pending, 5=completed, 6=credited, 9=under review
+                return [d for d in deposits if d.get("status") in [1, 5, 6, 9]]
             else:
                 logger.error(f"Deposit history error: {response.status_code} - {response.text}")
                 return []
@@ -144,12 +144,21 @@ class MEXCClient:
             deposits = self.get_deposit_history(coin=coin_str, limit=100)
             for d in deposits:
                 if d.get('txId') == txid:
+                    status = d.get('status')
+                    amount = float(d.get('amount', 0))
                     # Status 5 = completed/credited, 6 = credited
-                    if d.get('status') in [5, 6]:
-                        return True, float(d.get('amount', 0))
+                    if status in [5, 6]:
+                        return True, amount
+                    elif status == 9:
+                        logger.warning(f"   ⚠️ Deposit UNDER REVIEW (status=9) - MEXC risk control")
+                        logger.warning(f"   💡 Check MEXC app/website for verification requirements")
+                        return False, amount
+                    elif status == 1:
+                        logger.info(f"   ⏳ Deposit pending confirmation (status=1)")
+                        return False, amount
                     else:
-                        logger.info(f"   ⏳ Deposit found but status={d.get('status')} (not credited yet)")
-                        return False, float(d.get('amount', 0))
+                        logger.info(f"   ⏳ Deposit found but status={status} (not credited yet)")
+                        return False, amount
             return False, None
         except Exception as e:
             logger.error(f"❌ Error checking deposit: {e}")
