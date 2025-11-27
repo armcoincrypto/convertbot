@@ -24,6 +24,16 @@ class Settings(BaseSettings):
     rate_limit_cooldown: int = 30  # Seconds between swaps per user
     daily_swap_limit: int = 10     # Max swaps per user per day
     daily_volume_limit: float = 10000.0  # Max USD volume per user per day
+
+    # Redis settings (optional - falls back to in-memory if not available)
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Monitoring settings
+    metrics_enabled: bool = False
+    metrics_port: int = 9090
+
+    # Large swap threshold (requires manual approval)
+    large_swap_threshold: float = 5000.0  # USD
     
 @lru_cache()
 def get_settings():
