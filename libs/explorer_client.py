@@ -66,8 +66,13 @@ class ExplorerClient:
                 async with session.get(url) as response:
                     if response.status == 200:
                         data = await response.json()
-                        tx_data = data.get('data', {}).get(txid, {})
-                        if tx_data:
+                        # Handle case where 'data' might be a list or None
+                        data_section = data.get('data', {})
+                        if not isinstance(data_section, dict):
+                            logger.warning(f"   ⚠️ Blockchair returned unexpected format")
+                            return None
+                        tx_data = data_section.get(txid, {})
+                        if tx_data and isinstance(tx_data, dict):
                             block_id = tx_data.get('transaction', {}).get('block_id')
                             if block_id and block_id > 0:
                                 current_height = data.get('context', {}).get('state', 0)
@@ -203,9 +208,14 @@ class ExplorerClient:
                 async with session.get(url) as response:
                     if response.status == 200:
                         data = await response.json()
-                        tx_data = data.get('data', {}).get(txid, {})
-                        
-                        if tx_data:
+                        # Handle case where 'data' might be a list or None
+                        data_section = data.get('data', {})
+                        if not isinstance(data_section, dict):
+                            logger.warning(f"   ⚠️ Blockchair returned unexpected format for amount")
+                            data_section = {}
+                        tx_data = data_section.get(txid, {})
+
+                        if tx_data and isinstance(tx_data, dict):
                             outputs = tx_data.get('outputs', [])
                             for output in outputs:
                                 if output.get('recipient') == address:
