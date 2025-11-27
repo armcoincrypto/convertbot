@@ -48,7 +48,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton("₿ Bitcoin → USDT"), KeyboardButton("Ł Litecoin → USDT")],
         [KeyboardButton("💎 Dash → USDT"), KeyboardButton("💎 Dash → TRON")],
         [KeyboardButton("🔒 Monero → USDT")],
-        [KeyboardButton("📊 Ստուգել գործարքը")],
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
@@ -63,10 +62,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     
-    # Check if user clicked "Check transaction"
-    if "📊 Ստուգել" in text or "Ստուգել գործարքը" in text:
-        await check_transaction(update, context)
-        return ConversationHandler.END
     
     coin = None
     output_coin = "USDT"
@@ -92,11 +87,6 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         coin = "XMR"
         output_coin = "USDT"
         coin_key = "XMR"
-    elif "Ստուգել" in text or "📊" in text:
-        return await check_transaction(update, context)
-    elif "/start" in text or "Նոր փոխանակում" in text:
-        await start(update, context)
-        return ConversationHandler.END
     
     if not coin:
         await update.message.reply_text("Խնդրում ենք ընտրել վերևի կոճակներից:")
@@ -228,8 +218,6 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await conn.commit()
     
-    keyboard = [[KeyboardButton("🔄 Նոր փոխանակում /start"), KeyboardButton("📊 Ստուգել")]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
         f"✅ Պահպանվեց {output_coin} հասցեն:\n"
@@ -242,7 +230,6 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏳ Խնդրում ենք սպասել...\n"
         f"📱 Դուք կստանաք ծանուցումներ այստեղ:",
         parse_mode="HTML",
-        reply_markup=reply_markup
     )
     
     return ConversationHandler.END
@@ -320,13 +307,6 @@ def main():
     application.add_handler(conv_handler)
 
     # Handler for check button (outside conversation)
-    async def check_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await check_transaction(update, context)
-    
-    application.add_handler(MessageHandler(
-        filters.Regex("📊.*Ստուգել") & ~filters.COMMAND,
-        check_button_handler
-    ))
 
     
 
