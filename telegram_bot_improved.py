@@ -207,7 +207,7 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<code>{clean_text[:32]}\n{clean_text[32:]}</code>\n\n"
             f"Հիմա խնդրում ենք ուղարկել ձեր {output_coin} ({network}) ստացման հասցեն:\n\n"
             f"Օրինակ:\n"
-            f"<code>TVQXrLPpULB6y4KnJMyZorxWQqR7UhhL3g</code>",
+            f"<code>TXabc1234567890ExampleAddress12345</code>",
             parse_mode="HTML"
         )
         return WAITING_ADDRESS
@@ -438,7 +438,13 @@ def main():
         check_button_handler
     ))
 
-    
+    # Register admin commands
+    try:
+        from app.admin_commands import register_admin_commands
+        register_admin_commands(application)
+        print("✅ Admin commands registered")
+    except Exception as e:
+        print(f"⚠️ Could not register admin commands: {e}")
 
     print("🤖 Bot starting...")
     print("📍 Supported swaps:")
