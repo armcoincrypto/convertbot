@@ -1,4 +1,5 @@
 """Transaction validation rules"""
+import time
 from typing import Tuple, Optional
 from app.models import CoinType
 from libs.mexc_client import MEXCClient
@@ -7,19 +8,42 @@ from app.config import settings
 # Minimum transaction amount in USD
 MIN_AMOUNT_USD = 19.0
 
+# Price cache (60 second TTL)
+_price_cache = {}
+_cache_ttl = 60
+
+# Singleton MEXC client
+_mexc_client = None
+
+def _get_mexc_client():
+    """Get or create singleton MEXC client"""
+    global _mexc_client
+    if _mexc_client is None:
+        _mexc_client = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret)
+    return _mexc_client
+
 def get_coin_price_usd(coin: CoinType) -> Optional[float]:
-    """Get current price of coin in USD"""
+    """Get current price of coin in USD (with caching)"""
+    global _price_cache
+
+    coin_str = coin.value if hasattr(coin, 'value') else str(coin)
+    now = time.time()
+
+    # Check cache
+    if coin_str in _price_cache:
+        cached_price, cached_time = _price_cache[coin_str]
+        if now - cached_time < _cache_ttl:
+            return cached_price
+
     try:
-        mexc = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret)
-        
-        if coin == CoinType.DASH:
-            return mexc.get_ticker_price("DASHUSDT")
-        elif coin == CoinType.BTC:
-            return mexc.get_ticker_price("BTCUSDT")
-        elif coin == CoinType.LTC:
-            return mexc.get_ticker_price("LTCUSDT")
-        elif coin == CoinType.XMR:
-            return mexc.get_ticker_price("XMRUSDT")
+        mexc = _get_mexc_client()
+
+        symbol = f"{coin_str}USDT"
+        price = mexc.get_ticker_price(symbol)
+
+        if price:
+            _price_cache[coin_str] = (price, now)
+            return price
     except:
         pass
     return None

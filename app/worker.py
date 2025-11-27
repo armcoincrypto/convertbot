@@ -5,6 +5,7 @@ from typing import Dict, Any
 from app.logger import setup_logger
 from app.config import settings
 from app import db
+from app.db import get_db_path
 from app.models import DepositStatus, CoinType
 from libs.explorer_client import explorer_client
 from app.validation import validate_amount
@@ -18,14 +19,6 @@ telegram = TelegramClient(settings.telegram_bot_token, settings.admin_chat_id)
 
 # Add early sell tracking
 EARLY_SOLD_AMOUNTS = {}  # txid -> usdt_amount
-
-
-def get_db_path():
-    """Get database path from config."""
-    db_url = settings.database_url
-    if db_url.startswith('sqlite'):
-        return db_url.replace('sqlite:///', '')
-    return 'swapbot.db'
 
 
 async def cleanup_old_deposits():
@@ -126,7 +119,7 @@ async def worker_cycle() -> Dict[str, Any]:
                     if confs is None:
                         logger.warning(f"⚠️  Could not get confirmations from explorer")
                         # XMR: Check MEXC deposit history
-                        if deposit.coin == "XMR":
+                        if deposit.coin == CoinType.XMR:
                             logger.info("💰 XMR: Checking MEXC deposit history...")
                             try:
                                 deposits_list = mexc.get_deposit_history(coin="XMR", limit=50)

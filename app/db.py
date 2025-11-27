@@ -33,6 +33,7 @@ def _row_to_deposit(row) -> "Deposit":
         onchain_amount=row['onchain_amount'] if row['onchain_amount'] else 0.0,
         usdt_amount=row['usdt_amount'] if row['usdt_amount'] is not None else None,
         final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
+        output_coin=row['output_coin'] if 'output_coin' in row.keys() else 'USDT',
     )
 
 
@@ -52,9 +53,15 @@ async def init_db():
                 target_address TEXT,
                 onchain_amount REAL,
                 usdt_amount REAL,
-                final_usdt REAL
+                final_usdt REAL,
+                output_coin TEXT DEFAULT 'USDT'
             )
         """)
+        # Add output_coin column if it doesn't exist (migration)
+        try:
+            await conn.execute("ALTER TABLE deposits ADD COLUMN output_coin TEXT DEFAULT 'USDT'")
+        except:
+            pass  # Column already exists
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -107,6 +114,7 @@ async def get_pending_deposits(statuses: List[DepositStatus] = None) -> List[Dep
             onchain_amount=row['onchain_amount'] if row['onchain_amount'] else None,
             usdt_amount=row['usdt_amount'] if row.get('usdt_amount') else None,
             final_usdt=row['final_usdt'] if row.get('final_usdt') else None,
+            output_coin=row['output_coin'] if 'output_coin' in row.keys() else 'USDT',
         ))
     return deposits
 
@@ -217,7 +225,7 @@ async def get_deposit(txid: str) -> Optional[Deposit]:
     
     if not row:
         return None
-    
+
     return Deposit(
         txid=row['txid'],
         coin=CoinType(row['coin']),
@@ -229,6 +237,7 @@ async def get_deposit(txid: str) -> Optional[Deposit]:
         onchain_amount=row['onchain_amount'] if row['onchain_amount'] else None,
         usdt_amount=row['usdt_amount'] if row['usdt_amount'] is not None else None,
         final_usdt=row['final_usdt'] if row['final_usdt'] is not None else None,
+        output_coin=row['output_coin'] if 'output_coin' in row.keys() else 'USDT',
     )
 
 
@@ -271,8 +280,9 @@ async def get_user_deposits(user_id: int, limit: int = 10) -> List[Deposit]:
                 onchain_amount=row['onchain_amount'] if row['onchain_amount'] else None,
                 usdt_amount=row['usdt_amount'] if row.get('usdt_amount') else None,
                 final_usdt=row['final_usdt'] if row.get('final_usdt') else None,
+                output_coin=row['output_coin'] if 'output_coin' in row.keys() else 'USDT',
             ))
-        
+
         return deposits
 
 

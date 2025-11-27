@@ -3,17 +3,24 @@ import time
 import hmac
 import hashlib
 import requests
+import logging
 from urllib.parse import quote
 from typing import Dict, Tuple, Optional
+
+logger = logging.getLogger(__name__)
+
+# Default timeout for API calls (seconds)
+API_TIMEOUT = 10
 
 
 class MEXCClient:
     """MEXC Exchange API Client"""
-    
+
     def __init__(self, api_key: str, api_secret: str):
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = "https://api.mexc.com"
+        self.timeout = API_TIMEOUT
 
 
     def _quantize_amount(self, coin: str, amount: float) -> float:
@@ -42,10 +49,10 @@ class MEXCClient:
     def test_connection(self) -> bool:
         """Test MEXC API connection"""
         try:
-            response = requests.get(f"{self.base_url}/api/v3/ping", timeout=5)
+            response = requests.get(f"{self.base_url}/api/v3/ping", timeout=self.timeout)
             return response.status_code == 200
         except Exception as e:
-            print(f"Connection test failed: {e}")
+            logger.error(f"Connection test failed: {e}")
             return False
 
     def get_account_balance(self) -> Dict:
@@ -54,12 +61,12 @@ class MEXCClient:
             timestamp = str(int(time.time() * 1000))
             params = f"recvWindow=5000&timestamp={timestamp}"
             signature = self._sign(params)
-            
+
             url = f"{self.base_url}/api/v3/account?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
-            
-            response = requests.get(url, headers=headers)
-            
+
+            response = requests.get(url, headers=headers, timeout=self.timeout)
+
             if response.status_code == 200:
                 data = response.json()
                 balances = {}
@@ -71,10 +78,10 @@ class MEXCClient:
                         balances[asset] = {'free': free, 'locked': locked}
                 return balances
             else:
-                print(f"Failed to get balance: {response.status_code} {response.text}")
+                logger.error(f"Failed to get balance: {response.status_code} {response.text}")
                 return {}
         except Exception as e:
-            print(f"Error getting balance: {e}")
+            logger.error(f"Error getting balance: {e}")
             return {}
 
 
@@ -104,17 +111,17 @@ class MEXCClient:
                 # Filter successful deposits only
                 return [d for d in deposits if d.get("status") in [1, 5, 6]]  # 5=completed, 1=pending, 6=credited
             else:
-                print(f"Deposit history error: {response.status_code} - {response.text}")
+                logger.error(f"Deposit history error: {response.status_code} - {response.text}")
                 return []
         except Exception as e:
-            print(f"Get deposit history failed: {e}")
+            logger.error(f"Get deposit history failed: {e}")
             return []
 
     def get_ticker_price(self, symbol: str) -> Optional[float]:
         """Get current ticker price"""
         try:
             url = f"{self.base_url}/api/v3/ticker/price?symbol={symbol}"
-            response = requests.get(url)
+            response = requests.get(url, timeout=self.timeout)
             if response.status_code == 200:
                 return float(response.json()['price'])
             return None
@@ -141,11 +148,11 @@ class MEXCClient:
                     if d.get('status') in [5, 6]:
                         return True, float(d.get('amount', 0))
                     else:
-                        print(f"   ⏳ Deposit found but status={d.get('status')} (not credited yet)")
+                        logger.info(f"   ⏳ Deposit found but status={d.get('status')} (not credited yet)")
                         return False, float(d.get('amount', 0))
             return False, None
         except Exception as e:
-            print(f"❌ Error checking deposit: {e}")
+            logger.error(f"❌ Error checking deposit: {e}")
             return False, None
 
     def _check_response_error(self, data: Dict) -> Tuple[bool, Optional[str]]:
@@ -166,14 +173,14 @@ class MEXCClient:
         has_balance, available = self.check_coin_balance(coin_str, amount)
         if not has_balance:
             error = f"Insufficient {coin_str} balance: have {available}, need {amount}"
-            print(f"❌ {error}")
+            logger.error(f"❌ {error}")
             return False, {'error': error, 'error_code': 'INSUFFICIENT_BALANCE', 'available': available}
 
-        print(f"✅ Balance check passed: {available} {coin_str} available (need {amount})")
+        logger.info(f"✅ Balance check passed: {available} {coin_str} available (need {amount})")
 
         # Special handling for BTC (not allowed on MEXC API)
         if coin_str == 'BTC':
-            print(f"🔄 BTC not allowed on API, converting BTC → USDC → USDT")
+            logger.info(f"🔄 BTC not allowed on API, converting BTC → USDC → USDT")
 
             # Step 1: Sell BTC for USDC
             success1, result1 = self._trade_pair('BTCUSDC', amount, 'SELL')
@@ -181,7 +188,7 @@ class MEXCClient:
                 return False, result1
 
             usdc_amount = result1.get('received', 0)
-            print(f"   ✅ Step 1: {amount} BTC → {usdc_amount:.2f} USDC")
+            logger.info(f"   ✅ Step 1: {amount} BTC → {usdc_amount:.2f} USDC")
 
             # Step 2: Sell USDC for USDT
             time.sleep(1)
@@ -190,7 +197,7 @@ class MEXCClient:
                 return False, result2
 
             usdt_amount = result2.get('received', 0)
-            print(f"   ✅ Step 2: {usdc_amount:.2f} USDC → {usdt_amount:.2f} USDT")
+            logger.info(f"   ✅ Step 2: {usdc_amount:.2f} USDC → {usdt_amount:.2f} USDT")
 
             return True, {
                 'order_id': f"{result1.get('order_id')}+{result2.get('order_id')}",
@@ -218,7 +225,7 @@ class MEXCClient:
             url = f"{self.base_url}/api/v3/order?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
 
-            print(f"📤 Placing SELL order: {amount} {coin_str} → {symbol}")
+            logger.info(f"📤 Placing SELL order: {amount} {coin_str} → {symbol}")
             response = requests.post(url, headers=headers)
 
             if response.status_code == 200:
@@ -227,7 +234,7 @@ class MEXCClient:
                 # CRITICAL: Check for error codes in JSON response
                 is_error, error_msg = self._check_response_error(data)
                 if is_error:
-                    print(f"❌ Trade failed: {error_msg}")
+                    logger.error(f"❌ Trade failed: {error_msg}")
                     return False, {'error': error_msg}
 
                 order_id = data.get('orderId', 'N/A')
@@ -238,7 +245,7 @@ class MEXCClient:
                 usdt_after = balances_after.get('USDT', {}).get('free', 0)
                 usdt_received = usdt_after - usdt_before
 
-                print(f"✅ Sold {amount} {coin_str} → {usdt_received:.2f} USDT")
+                logger.info(f"✅ Sold {amount} {coin_str} → {usdt_received:.2f} USDT")
 
                 return True, {
                     'order_id': order_id,
@@ -247,12 +254,12 @@ class MEXCClient:
                 }
             else:
                 error = f"{response.status_code}: {response.text}"
-                print(f"❌ Trade failed: {error}")
+                logger.error(f"❌ Trade failed: {error}")
                 return False, {'error': error}
 
         except Exception as e:
             error = str(e)
-            print(f"❌ Exception: {error}")
+            logger.error(f"❌ Exception: {error}")
             return False, {'error': error}
 
     def withdraw_usdt_trc20(self, address: str, amount: float) -> Tuple[bool, Dict]:
@@ -268,14 +275,14 @@ class MEXCClient:
             url = f"{self.base_url}/api/v3/capital/withdraw/apply?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
             
-            print(f"📤 Withdrawing {amount} USDT to {address[:10]}...")
+            logger.info(f"📤 Withdrawing {amount} USDT to {address[:10]}...")
             response = requests.post(url, headers=headers)
             
             if response.status_code == 200:
                 data = response.json()
                 withdraw_id = data.get('id', 'N/A')
                 
-                print(f"✅ Withdrawal submitted: ID={withdraw_id}")
+                logger.info(f"✅ Withdrawal submitted: ID={withdraw_id}")
                 
                 return True, {
                     'withdraw_id': withdraw_id,
@@ -285,12 +292,12 @@ class MEXCClient:
                 }
             else:
                 error = f"{response.status_code}: {response.text}"
-                print(f"❌ Withdrawal failed: {error}")
+                logger.error(f"❌ Withdrawal failed: {error}")
                 return False, {'error': error}
                 
         except Exception as e:
             error = str(e)
-            print(f"❌ Exception: {error}")
+            logger.error(f"❌ Exception: {error}")
             return False, {'error': error}
 
     def buy_crypto_with_usdt(self, coin: str, usdt_amount: float) -> Tuple[bool, Dict]:
@@ -314,20 +321,20 @@ class MEXCClient:
             url = f"{self.base_url}/api/v3/order?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
             
-            print(f"📤 Placing BUY order: {amount} {coin_str} → {symbol}")
+            logger.info(f"📤 Placing BUY order: {amount} {coin_str} → {symbol}")
             response = requests.post(url, headers=headers)
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"✅ Bought {amount} {coin_str}")
+                logger.info(f"✅ Bought {amount} {coin_str}")
                 return True, {'order_id': data.get('orderId'), 'amount': amount}
             else:
                 error = f"{response.status_code}: {response.text}"
-                print(f"❌ Buy failed: {error}")
+                logger.error(f"❌ Buy failed: {error}")
                 return False, {'error': error}
                 
         except Exception as e:
-            print(f"❌ Exception: {e}")
+            logger.error(f"❌ Exception: {e}")
             return False, {'error': str(e)}
 
     def withdraw_trx(self, address: str, amount: float) -> Tuple[bool, Dict]:
@@ -343,21 +350,21 @@ class MEXCClient:
             url = f"{self.base_url}/api/v3/capital/withdraw/apply?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
             
-            print(f"📤 Withdrawing {amount} TRX to {address[:10]}...")
+            logger.info(f"📤 Withdrawing {amount} TRX to {address[:10]}...")
             response = requests.post(url, headers=headers)
             
             if response.status_code == 200:
                 data = response.json()
                 withdraw_id = data.get('id', 'N/A')
-                print(f"✅ TRX withdrawal: ID={withdraw_id}")
+                logger.info(f"✅ TRX withdrawal: ID={withdraw_id}")
                 return True, {'withdraw_id': withdraw_id}
             else:
                 error = f"{response.status_code}: {response.text}"
-                print(f"❌ Withdrawal failed: {error}")
+                logger.error(f"❌ Withdrawal failed: {error}")
                 return False, {'error': error}
                 
         except Exception as e:
-            print(f"❌ Exception: {e}")
+            logger.error(f"❌ Exception: {e}")
             return False, {'error': str(e)}
 
     def _trade_pair(self, symbol: str, amount: float, side: str) -> Tuple[bool, Dict]:
@@ -388,7 +395,7 @@ class MEXCClient:
                 # CRITICAL: Check for error codes in JSON response
                 is_error, error_msg = self._check_response_error(data)
                 if is_error:
-                    print(f"❌ Trade pair failed: {error_msg}")
+                    logger.error(f"❌ Trade pair failed: {error_msg}")
                     return False, {'error': error_msg}
 
                 order_id = data.get('orderId', 'N/A')
@@ -413,7 +420,7 @@ class MEXCClient:
                     after_balance = balances_after.get(quote, {}).get("free", 0)
                     received = after_balance - before_balance
 
-                    print(f"   💰 Balance change: {quote} {before_balance:.8f} → {after_balance:.8f} (received: {received:.8f})")
+                    logger.info(f"   💰 Balance change: {quote} {before_balance:.8f} → {after_balance:.8f} (received: {received:.8f})")
 
                 return True, {
                     'order_id': order_id,

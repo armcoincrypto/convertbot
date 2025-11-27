@@ -102,28 +102,36 @@ async def process_confirmed_deposit(deposit: Deposit) -> bool:
             return False
         
         logger.info(f"💵 Breakdown: {usdt_amount:.2f} USDT - ${commission:.2f} commission ({settings.commission_percent}%) - ${network_fee:.2f} network = ${final_amount:.2f} final")
-        
-        
+
+        # Determine output coin (USDT or TRX)
+        output_coin = getattr(deposit, 'output_coin', 'USDT') or 'USDT'
+        logger.info(f"📤 Output coin: {output_coin}")
+
         # Step 4: Withdrawal logic
         # XMR: Withdraw immediately (already fully confirmed on MEXC)
         # BTC/LTC/DASH: Two-tier (sell early, withdraw after full confs)
-        
+
         # Store USDT amount in database
         await db.update_deposit_usdt(deposit.txid, usdt_amount, final_amount)
-        
+
         if deposit.coin == CoinType.XMR:
             # XMR: Already 10+ confs on MEXC, withdraw immediately
             logger.info(f"💰 XMR detected - withdrawing immediately...")
-            
+
             if settings.dry_run:
-                logger.info(f"🧪 DRY RUN: Would withdraw {final_amount:.2f} USDT")
+                logger.info(f"🧪 DRY RUN: Would withdraw {final_amount:.2f} {output_coin}")
             else:
-                success, result = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
+                # Handle TRX output for XMR (if ever needed)
+                if output_coin == 'TRX':
+                    success, result = await _withdraw_as_trx(deposit, final_amount)
+                else:
+                    success, result = mexc.withdraw_usdt_trc20(deposit.target_address, final_amount)
+
                 if success:
                     withdraw_id = result.get('withdraw_id')
                     logger.info(f"✅ Withdrawal successful: {withdraw_id}")
                     await db.update_deposit_status(deposit.txid, DepositStatus.WITHDRAWN)
-                    await _notify_success(deposit, final_amount, "USDT", withdraw_id)
+                    await _notify_success(deposit, final_amount, output_coin, withdraw_id)
                 else:
                     logger.error(f"❌ Withdrawal failed: {result}")
                     await db.update_deposit_status(deposit.txid, DepositStatus.WITHDRAWAL_FAILED)
@@ -131,7 +139,7 @@ async def process_confirmed_deposit(deposit: Deposit) -> bool:
         else:
             # BTC/LTC/DASH: Mark as SOLD, withdraw after full confirmations
             await db.update_deposit_status(deposit.txid, DepositStatus.SOLD)
-            logger.info(f"✅ Marked as SOLD - withdrawal pending full confirmations")
+            logger.info(f"✅ Marked as SOLD - withdrawal pending full confirmations ({output_coin})")
         
         logger.info(f"{'='*60}")
         logger.info(f"✅ PIPELINE COMPLETE")
@@ -161,6 +169,44 @@ async def _notify_success(deposit: Deposit, amount: float, coin: str, withdraw_i
         logger.error(f"Failed to notify user: {e}")
 
 
+async def _withdraw_as_trx(deposit: Deposit, usdt_amount: float) -> tuple:
+    """Convert USDT to TRX and withdraw"""
+    import asyncio
+    logger.info(f"💱 Converting {usdt_amount:.2f} USDT → TRX for withdrawal...")
+
+    try:
+        # Step 1: Buy TRX with USDT
+        success, result = await asyncio.to_thread(
+            mexc.buy_crypto_with_usdt,
+            'TRX',
+            usdt_amount
+        )
+
+        if not success:
+            logger.error(f"❌ Failed to buy TRX: {result.get('error')}")
+            return False, result
+
+        trx_amount = result.get('amount', 0)
+        logger.info(f"✅ Bought {trx_amount:.2f} TRX")
+
+        # Step 2: Withdraw TRX
+        import time
+        time.sleep(2)  # Wait for balance to settle
+
+        success, result = mexc.withdraw_trx(deposit.target_address, trx_amount)
+
+        if success:
+            logger.info(f"✅ TRX withdrawal successful")
+            return True, {'withdraw_id': result.get('withdraw_id'), 'amount': trx_amount}
+        else:
+            logger.error(f"❌ TRX withdrawal failed: {result.get('error')}")
+            return False, result
+
+    except Exception as e:
+        logger.error(f"❌ TRX conversion error: {e}")
+        return False, {'error': str(e)}
+
+
 async def _notify_error(deposit: Deposit, error: str):
     """Notify user of error"""
     try:
@@ -176,13 +222,15 @@ async def _notify_error(deposit: Deposit, error: str):
 
 
 async def withdraw_usdt_only(deposit: Deposit) -> bool:
-    """Withdraw USDT for an already-sold deposit (BTC/LTC/DASH after full confirmations)"""
+    """Withdraw USDT/TRX for an already-sold deposit (BTC/LTC/DASH after full confirmations)"""
     from app.config import settings
     from libs.mexc_client import MEXCClient
     from libs.telegram_client import TelegramClient
     import asyncio
 
-    logger.info(f"📤 Withdrawing USDT for {deposit.txid[:16]}...")
+    # Determine output coin
+    output_coin = getattr(deposit, 'output_coin', 'USDT') or 'USDT'
+    logger.info(f"📤 Withdrawing {output_coin} for {deposit.txid[:16]}...")
 
     try:
         mexc_client = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret)
@@ -198,21 +246,28 @@ async def withdraw_usdt_only(deposit: Deposit) -> bool:
             logger.error(f"❌ No stored USDT amount! This shouldn't happen.")
             return False
 
-        logger.info(f"💵 Final withdrawal: {final_amount:.2f} USDT")
+        logger.info(f"💵 Final withdrawal: {final_amount:.2f} → {output_coin}")
 
         if settings.dry_run:
-            logger.info(f"🧪 DRY RUN: Would withdraw {final_amount:.2f} USDT")
+            logger.info(f"🧪 DRY RUN: Would withdraw {final_amount:.2f} {output_coin}")
             return True
 
-        # Actual withdrawal
-        success, result = mexc_client.withdraw_usdt_trc20(deposit.target_address, final_amount)
+        # Actual withdrawal - handle TRX vs USDT
+        if output_coin == 'TRX':
+            # Convert USDT to TRX and withdraw
+            success, result = await _withdraw_as_trx(deposit, final_amount)
+            withdrawn_amount = result.get('amount', final_amount) if success else final_amount
+        else:
+            # Standard USDT withdrawal
+            success, result = mexc_client.withdraw_usdt_trc20(deposit.target_address, final_amount)
+            withdrawn_amount = final_amount
 
         if success:
             withdraw_id = result.get('withdraw_id', 'N/A')
             logger.info(f"✅ Withdrawal successful: {withdraw_id}")
 
-            # Use same notification format as XMR (consistent for all pairs)
-            await _notify_success(deposit, final_amount, "USDT", withdraw_id)
+            # Notify with correct output coin
+            await _notify_success(deposit, withdrawn_amount, output_coin, withdraw_id)
 
             return True
         else:

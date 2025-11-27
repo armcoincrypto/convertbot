@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from app.db import txid_exists, get_txid_owner
+from app.db import txid_exists, get_txid_owner, get_db_path
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from app.config import settings
 from libs.explorer_client import explorer_client
@@ -101,12 +101,6 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not coin:
         await update.message.reply_text("Խնդրում ենք ընտրել վերևի կոճակներից:")
         return CHOOSING_COIN
-    elif "Ստուգել գործարքը" in text or "📊" in text:
-        return await check_transaction(update, context)
-    
-    if not coin:
-        await update.message.reply_text("Խնդրում ենք ընտրել վերևի կոճակներից:")
-        return CHOOSING_COIN
     
     context.user_data["coin"] = coin
     context.user_data["output_coin"] = output_coin
@@ -150,7 +144,7 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if re.match(r"^[a-f0-9]{64}$", clean_text):
         # Check if TXID already exists
         import aiosqlite
-        async with aiosqlite.connect("swapbot.db") as conn:
+        async with aiosqlite.connect(get_db_path()) as conn:
             async with conn.execute("SELECT txid FROM deposits WHERE txid = ?", (clean_text,)) as cursor:
                 existing = await cursor.fetchone()
         
@@ -217,7 +211,7 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     output_coin = context.user_data.get("output_coin", "USDT")
     coin_key = context.user_data.get("coin_key")
     
-    async with aiosqlite.connect("swapbot.db") as conn:
+    async with aiosqlite.connect(get_db_path()) as conn:
         await conn.execute(
             "INSERT OR REPLACE INTO users (user_id, usdt_trc20_address) VALUES (?, ?)",
             (user_id, address)
@@ -257,7 +251,7 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check user's transaction status"""
     user_id = update.effective_user.id
     
-    async with aiosqlite.connect("swapbot.db") as conn:
+    async with aiosqlite.connect(get_db_path()) as conn:
         async with conn.execute(
             "SELECT txid, coin, status, confs, required_confs, amount, output_coin FROM deposits WHERE user_id = ? ORDER BY inserted_at DESC LIMIT 5",
             (user_id,)
@@ -291,40 +285,6 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(message)
     return
-    
-    status_emoji = {
-        "NEW": "🆕",
-        "CONFIRMING": "⏳",
-        "CONFIRMED": "✅",
-        "SOLD": "💱",
-        "WITHDRAWN": "🎉",
-        "FAILED": "❌"
-    }
-    
-    status_text = {
-        "NEW": "Նոր",
-        "CONFIRMING": "Հաստատվում է",
-        "CONFIRMED": "Հաստատված",
-        "SOLD": "Վաճառված",
-        "WITHDRAWN": "Ավարտված",
-        "FAILED": "Սխալ"
-    }
-    
-    keyboard = [[KeyboardButton("🔄 /start")]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
-    await update.message.reply_text(
-        f"📊 Գործարքի կարգավիճակ\n\n"
-        f"TXID: <code>{txid[:16]}...{txid[-8:]}</code>\n"
-        f"Մետաղադրամ: {coin}\n"
-        f"Կարգավիճակ: {status_emoji.get(status, '❓')} {status_text.get(status, status)}\n"
-        f"Հաստատումներ: {confs}/{required}\n\n"
-        f"{'✅ Շուտով կավարտվի!' if status in ['CONFIRMED', 'SOLD'] else '⏳ Սպասեք...' if status == 'CONFIRMING' else '🔍 Ստուգվում է...'}",
-        parse_mode="HTML",
-        reply_markup=reply_markup
-    )
-    
-    return CHOOSING_COIN
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -374,11 +334,9 @@ def main():
     print("📍 Supported swaps:")
     print("   • Bitcoin → USDT")
     print("   • Litecoin → USDT")
-    print("   • Bitcoin → USDT")
-    print("   • Litecoin → USDT")
     print("   • Dash → USDT")
     print("   • Dash → TRON")
-    print("   • USDT → TRON")
+    print("   • Monero → USDT")
     application.run_polling()
 
 if __name__ == "__main__":
