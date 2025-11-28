@@ -211,7 +211,9 @@ async def worker_cycle() -> Dict[str, Any]:
                     try:
                         deposits_list = mexc.get_deposit_history(coin=coin_str, limit=100)
                         for d in deposits_list:
-                            if d.get('txId') == deposit.txid:
+                            mexc_txid = d.get('txId', '')
+                            # MEXC adds output index suffix like ":0" or ":1" for UTXO coins
+                            if deposit.txid in mexc_txid or mexc_txid.startswith(deposit.txid):
                                 mexc_status = d.get('status')
                                 break
                     except:

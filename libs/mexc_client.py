@@ -143,7 +143,10 @@ class MEXCClient:
         try:
             deposits = self.get_deposit_history(coin=coin_str, limit=100)
             for d in deposits:
-                if d.get('txId') == txid:
+                mexc_txid = d.get('txId', '')
+                # MEXC adds output index suffix like ":0" or ":1" for UTXO coins
+                # Match if our txid is contained in MEXC txid or vice versa
+                if txid in mexc_txid or mexc_txid.startswith(txid):
                     status = d.get('status')
                     amount = float(d.get('amount', 0))
                     # Status 5 = completed/credited, 6 = credited
