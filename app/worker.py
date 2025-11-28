@@ -205,6 +205,18 @@ async def worker_cycle() -> Dict[str, Any]:
                     # CRITICAL: Verify deposit is actually credited on MEXC before selling!
                     logger.info(f"🔍 Verifying deposit is credited on MEXC...")
                     coin_str = deposit.coin.value if hasattr(deposit.coin, 'value') else str(deposit.coin)
+
+                    # Get actual MEXC deposit status for better logging
+                    mexc_status = None
+                    try:
+                        deposits_list = mexc.get_deposit_history(coin=coin_str, limit=100)
+                        for d in deposits_list:
+                            if d.get('txId') == deposit.txid:
+                                mexc_status = d.get('status')
+                                break
+                    except:
+                        pass
+
                     is_on_mexc, mexc_amount = mexc.verify_deposit_on_mexc(coin_str, deposit.txid)
 
                     if is_on_mexc and mexc_amount:
@@ -214,7 +226,15 @@ async def worker_cycle() -> Dict[str, Any]:
                         await db.update_deposit_amount(deposit.txid, onchain_amount)
                     else:
                         # Deposit not yet credited on MEXC - wait
-                        logger.warning(f"⏳ Deposit not yet credited on MEXC, waiting...")
+                        if mexc_status == 9:
+                            logger.warning(f"⚠️ MEXC STATUS 9: Deposit UNDER REVIEW (risk control)")
+                            logger.warning(f"   💡 Check MEXC app/website for verification requirements!")
+                        elif mexc_status == 1:
+                            logger.info(f"⏳ MEXC status 1: Deposit pending confirmation")
+                        elif mexc_status:
+                            logger.warning(f"⏳ MEXC status {mexc_status}: Not credited yet")
+                        else:
+                            logger.warning(f"⏳ Deposit not found on MEXC yet")
                         logger.info(f"   TXID: {deposit.txid[:32]}...")
                         logger.info(f"   Will retry in next cycle")
                         continue
