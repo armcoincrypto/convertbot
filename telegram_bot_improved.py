@@ -230,8 +230,9 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏳ Խնդրում ենք սպասել...\n"
         f"📱 Դուք կստանաք ծանուցումներ այստեղ:",
         parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove()
     )
-    
+
     return ConversationHandler.END
 
 async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
