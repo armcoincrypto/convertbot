@@ -1,8 +1,12 @@
-"""Telegram Bot with Dash to TRON support."""
+"""Telegram Bot with Dash to TRON support and Referral Program."""
 import asyncio
 import logging
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand
-from app.db import txid_exists, get_txid_owner, get_db_path
+from app.db import (
+    txid_exists, get_txid_owner, get_db_path,
+    init_referral_tables, ensure_user_exists, get_or_create_referral_code,
+    get_user_by_referral_code, set_user_referrer, get_referral_stats
+)
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from app.config import settings
 from libs.explorer_client import explorer_client
@@ -44,6 +48,21 @@ COIN_INFO = {
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    # Ensure user exists in database
+    await ensure_user_exists(user_id)
+
+    # Check for referral code in deep link (e.g., /start REF12345678)
+    if context.args and len(context.args) > 0:
+        ref_code = context.args[0]
+        if ref_code.startswith('REF'):
+            referrer_id = await get_user_by_referral_code(ref_code)
+            if referrer_id and referrer_id != user_id:
+                success = await set_user_referrer(user_id, referrer_id)
+                if success:
+                    logging.info(f"User {user_id} referred by {referrer_id} via code {ref_code}")
+
     keyboard = [
         [KeyboardButton("₿ Bitcoin → USDT"), KeyboardButton("Ł Litecoin → USDT")],
         [KeyboardButton("💎 Dash → USDT"), KeyboardButton("💎 Dash → TRON")],
@@ -51,10 +70,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "👋 Բարև: Ուրախ եմ աշխատել քեզ համար։\n"
-        "\n⚠️ Նվազագույն գումար: $20 USD\n"
-        "💡 Միջնորդավճար: 3% + $1\n"
-        "✌️ Ընտրեք փոխանակման տեսակը:",
+        "👋 Welcome!\n\n"
+        "⚠️ Minimum amount: $20 USD\n"
+        "💡 Fee: 3% + $1\n"
+        "✌️ Choose exchange type:",
         reply_markup=reply_markup
     )
     return CHOOSING_COIN
@@ -298,6 +317,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start    – Start new exchange\n"
         "/status   – Check transaction status\n"
         "/check    – Same as /status\n"
+        "/referral – Earn 30% from referrals\n"
         "/cancel   – Cancel current operation\n"
         "/operator – Contact support\n"
         "/help     – Show this message\n\n"
@@ -315,6 +335,39 @@ async def operator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "We respond within 24 hours."
     )
 
+
+async def referral_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show referral program info and stats"""
+    user_id = update.effective_user.id
+
+    # Ensure user exists and get their referral code
+    await ensure_user_exists(user_id)
+    ref_code = await get_or_create_referral_code(user_id)
+
+    # Get stats
+    stats = await get_referral_stats(user_id)
+
+    # Get bot username for the link
+    bot_username = (await context.bot.get_me()).username
+
+    # Build message
+    message = (
+        "💰 Referral Program – Earn Forever!\n\n"
+        "Invite friends and earn 30% of our fee from every exchange – forever.\n\n"
+        f"🔗 Your link:\n"
+        f"https://t.me/{bot_username}?start={ref_code}\n\n"
+        f"💵 Total earned: ${stats['total_earned']:.2f}\n"
+        f"👥 Active referrals: {stats['active_referrals']}\n"
+        f"👤 Total invited: {stats['total_referrals']}\n\n"
+        "🎁 Bonuses:\n"
+        f"{'✅' if '50_REFERRALS' in stats['bonuses_claimed'] else '⬜'} 50 active → +$50\n"
+        f"{'✅' if '200_REFERRALS' in stats['bonuses_claimed'] else '⬜'} 200 active → +$200\n\n"
+        "Thank you for being with us! 🔥"
+    )
+
+    await update.message.reply_text(message)
+
+
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown commands - show help"""
     await update.message.reply_text(
@@ -327,11 +380,17 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def set_bot_commands(application):
-    """Set bot commands menu automatically"""
+    """Set bot commands menu and initialize referral tables"""
+    # Initialize referral tables
+    await init_referral_tables()
+    print("✅ Referral tables initialized")
+
+    # Set bot commands
     commands = [
         BotCommand("start", "Start new exchange"),
         BotCommand("status", "Check transaction status"),
         BotCommand("check", "Same as /status"),
+        BotCommand("referral", "Earn 30% from referrals"),
         BotCommand("cancel", "Cancel current operation"),
         BotCommand("help", "Show all commands"),
         BotCommand("operator", "Contact support"),
@@ -354,6 +413,7 @@ def main():
             CommandHandler("cancel", cancel),
             CommandHandler("status", check_transaction),
             CommandHandler("check", check_transaction),
+            CommandHandler("referral", referral_command),
             CommandHandler("help", help_command),
             CommandHandler("operator", operator_command),
             CommandHandler("start", start),
@@ -365,9 +425,10 @@ def main():
     # Additional command handlers
     application.add_handler(CommandHandler("status", check_transaction))
     application.add_handler(CommandHandler("check", check_transaction))
+    application.add_handler(CommandHandler("referral", referral_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("operator", operator_command))
-    
+
     # Handle unknown messages (outside conversation)
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 

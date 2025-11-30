@@ -5,7 +5,7 @@ from typing import Dict, Any
 from app.logger import setup_logger
 from app.config import settings
 from app import db
-from app.db import get_db_path
+from app.db import get_db_path, get_user_referrer, add_referral_earning, check_and_award_bonus
 from app.models import DepositStatus, CoinType
 from libs.explorer_client import explorer_client
 from app.validation import validate_amount
@@ -362,6 +362,35 @@ async def worker_cycle() -> Dict[str, Any]:
                         if success:
                             await db.update_deposit_status(deposit.txid, DepositStatus.WITHDRAWN)
                             logger.info(f"✅ Withdrawal complete!")
+
+                            # === REFERRAL EARNINGS ===
+                            try:
+                                referrer_id = await get_user_referrer(deposit.user_id)
+                                if referrer_id:
+                                    # Calculate our fee: 3% + $1
+                                    usdt_amount = deposit.usdt_amount or 0
+                                    commission_percent = float(settings.commission_percent) / 100
+                                    our_fee = (usdt_amount * commission_percent) + 1.0
+                                    # Referrer gets 30% of our fee
+                                    referrer_cut = our_fee * 0.30
+
+                                    await add_referral_earning(
+                                        referrer_id=referrer_id,
+                                        referred_id=deposit.user_id,
+                                        txid=deposit.txid,
+                                        swap_amount=usdt_amount,
+                                        our_fee=our_fee,
+                                        referrer_cut=referrer_cut
+                                    )
+                                    logger.info(f"💰 Referral: User {referrer_id} earned ${referrer_cut:.2f} (30% of ${our_fee:.2f} fee)")
+
+                                    # Check for milestone bonuses
+                                    bonus = await check_and_award_bonus(referrer_id)
+                                    if bonus:
+                                        logger.info(f"🎁 Bonus awarded: {bonus[0]} = ${bonus[1]}")
+                            except Exception as e:
+                                logger.error(f"⚠️ Referral earning failed: {e}")
+                            # === END REFERRAL ===
                         else:
                             logger.error(f"❌ Withdrawal failed")
                     else:

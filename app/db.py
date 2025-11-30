@@ -299,7 +299,7 @@ async def create_withdrawal(txid: str, user_id: int, coin: str, amount: float,
         logger.info(f"Created withdrawal record: {withdraw_id}")
 
 
-async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float, 
+async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float,
                               final_amount: float, fee: float, trade_order_id: str) -> None:
     """Record withdrawal details."""
     async with aiosqlite.connect(get_db_path()) as conn:
@@ -309,3 +309,263 @@ async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float,
         """, (txid, withdrawal_id, amount_usdt, final_amount, fee, trade_order_id))
         await conn.commit()
     logger.info(f"Added withdrawal info for {txid}")
+
+
+# ==================== REFERRAL SYSTEM ====================
+
+import random
+import string
+
+def generate_referral_code() -> str:
+    """Generate unique referral code like REF12345678"""
+    chars = string.ascii_uppercase + string.digits
+    random_part = ''.join(random.choices(chars, k=8))
+    return f"REF{random_part}"
+
+
+async def init_referral_tables():
+    """Initialize referral system tables"""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        # Add referral columns to users table
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN referral_code TEXT UNIQUE")
+        except:
+            pass
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
+        except:
+            pass
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN referral_balance REAL DEFAULT 0")
+        except:
+            pass
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP")
+        except:
+            pass
+
+        # Create referral earnings log table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS referral_earnings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                referrer_id INTEGER NOT NULL,
+                referred_id INTEGER NOT NULL,
+                deposit_txid TEXT NOT NULL,
+                swap_amount REAL NOT NULL,
+                our_fee REAL NOT NULL,
+                referrer_cut REAL NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Create referral bonuses table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS referral_bonuses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                bonus_type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        await conn.commit()
+    logger.info("Referral tables initialized")
+
+
+async def get_or_create_referral_code(user_id: int) -> str:
+    """Get user's referral code or create one"""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        # Check if user has a code
+        async with conn.execute(
+            "SELECT referral_code FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if row and row[0]:
+            return row[0]
+
+        # Generate new unique code
+        for _ in range(10):  # Try up to 10 times
+            code = generate_referral_code()
+            try:
+                await conn.execute(
+                    "UPDATE users SET referral_code = ? WHERE user_id = ?",
+                    (code, user_id)
+                )
+                await conn.commit()
+                return code
+            except:
+                continue
+
+        # Fallback: use user_id based code
+        code = f"REF{user_id}"
+        await conn.execute(
+            "UPDATE users SET referral_code = ? WHERE user_id = ?",
+            (code, user_id)
+        )
+        await conn.commit()
+        return code
+
+
+async def get_user_by_referral_code(code: str) -> Optional[int]:
+    """Get user_id by referral code"""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        async with conn.execute(
+            "SELECT user_id FROM users WHERE referral_code = ?", (code,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    return row[0] if row else None
+
+
+async def set_user_referrer(user_id: int, referrer_id: int) -> bool:
+    """Set who referred this user (only if not already set)"""
+    if user_id == referrer_id:
+        return False  # Can't refer yourself
+
+    async with aiosqlite.connect(get_db_path()) as conn:
+        # Check if already has referrer
+        async with conn.execute(
+            "SELECT referred_by FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if row and row[0]:
+            return False  # Already has referrer
+
+        await conn.execute(
+            "UPDATE users SET referred_by = ? WHERE user_id = ?",
+            (referrer_id, user_id)
+        )
+        await conn.commit()
+        logger.info(f"User {user_id} referred by {referrer_id}")
+        return True
+
+
+async def get_user_referrer(user_id: int) -> Optional[int]:
+    """Get referrer user_id for a user"""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        async with conn.execute(
+            "SELECT referred_by FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    return row[0] if row and row[0] else None
+
+
+async def add_referral_earning(referrer_id: int, referred_id: int, txid: str,
+                                swap_amount: float, our_fee: float, referrer_cut: float) -> None:
+    """Record a referral earning"""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        # Add to earnings log
+        await conn.execute("""
+            INSERT INTO referral_earnings
+            (referrer_id, referred_id, deposit_txid, swap_amount, our_fee, referrer_cut)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (referrer_id, referred_id, txid, swap_amount, our_fee, referrer_cut))
+
+        # Update referrer's balance
+        await conn.execute(
+            "UPDATE users SET referral_balance = referral_balance + ? WHERE user_id = ?",
+            (referrer_cut, referrer_id)
+        )
+        await conn.commit()
+    logger.info(f"Referral earning: {referrer_id} earned ${referrer_cut:.2f} from {referred_id}")
+
+
+async def get_referral_stats(user_id: int) -> dict:
+    """Get referral statistics for a user"""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        # Get balance
+        async with conn.execute(
+            "SELECT referral_balance FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        balance = row[0] if row and row[0] else 0
+
+        # Count active referrals (users who completed at least 1 swap)
+        async with conn.execute("""
+            SELECT COUNT(DISTINCT u.user_id)
+            FROM users u
+            JOIN deposits d ON u.user_id = d.user_id
+            WHERE u.referred_by = ? AND d.status = 'WITHDRAWN'
+        """, (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        active_referrals = row[0] if row else 0
+
+        # Total referrals (all users referred, even without swaps)
+        async with conn.execute(
+            "SELECT COUNT(*) FROM users WHERE referred_by = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        total_referrals = row[0] if row else 0
+
+        # Total earned
+        async with conn.execute(
+            "SELECT SUM(referrer_cut) FROM referral_earnings WHERE referrer_id = ?",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        total_earned = row[0] if row and row[0] else 0
+
+        # Get bonuses claimed
+        async with conn.execute(
+            "SELECT bonus_type FROM referral_bonuses WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            bonuses = [row[0] for row in await cursor.fetchall()]
+
+    return {
+        'balance': balance,
+        'active_referrals': active_referrals,
+        'total_referrals': total_referrals,
+        'total_earned': total_earned,
+        'bonuses_claimed': bonuses
+    }
+
+
+async def check_and_award_bonus(user_id: int) -> Optional[tuple]:
+    """Check if user earned a milestone bonus and award it"""
+    stats = await get_referral_stats(user_id)
+    active = stats['active_referrals']
+    claimed = stats['bonuses_claimed']
+
+    bonus_to_award = None
+
+    if active >= 200 and '200_REFERRALS' not in claimed:
+        bonus_to_award = ('200_REFERRALS', 200.0)
+    elif active >= 50 and '50_REFERRALS' not in claimed:
+        bonus_to_award = ('50_REFERRALS', 50.0)
+
+    if bonus_to_award:
+        async with aiosqlite.connect(get_db_path()) as conn:
+            await conn.execute("""
+                INSERT INTO referral_bonuses (user_id, bonus_type, amount)
+                VALUES (?, ?, ?)
+            """, (user_id, bonus_to_award[0], bonus_to_award[1]))
+
+            await conn.execute(
+                "UPDATE users SET referral_balance = referral_balance + ? WHERE user_id = ?",
+                (bonus_to_award[1], user_id)
+            )
+            await conn.commit()
+        logger.info(f"Awarded {bonus_to_award[0]} bonus (${bonus_to_award[1]}) to user {user_id}")
+        return bonus_to_award
+
+    return None
+
+
+async def ensure_user_exists(user_id: int) -> None:
+    """Make sure user exists in database with a referral code"""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        async with conn.execute(
+            "SELECT user_id FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if not row:
+            code = generate_referral_code()
+            await conn.execute(
+                "INSERT INTO users (user_id, usdt_trc20_address, referral_code) VALUES (?, '', ?)",
+                (user_id, code)
+            )
+            await conn.commit()
+            logger.info(f"Created user {user_id} with referral code {code}")
