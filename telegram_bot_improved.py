@@ -241,7 +241,7 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     async with aiosqlite.connect(get_db_path()) as conn:
         async with conn.execute(
-            "SELECT txid, coin, status, confs, required_confs, amount, output_coin FROM deposits WHERE user_id = ? ORDER BY inserted_at DESC LIMIT 5",
+            "SELECT txid, coin, status, confs, required_confs, onchain_amount, output_coin FROM deposits WHERE user_id = ? ORDER BY inserted_at DESC LIMIT 5",
             (user_id,)
         ) as cursor:
             rows = await cursor.fetchall()
