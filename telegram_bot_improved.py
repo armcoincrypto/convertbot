@@ -1,7 +1,7 @@
 """Telegram Bot with Dash to TRON support."""
 import asyncio
 import logging
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand
 from app.db import txid_exists, get_txid_owner, get_db_path
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from app.config import settings
@@ -325,9 +325,23 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📞 Odelays delays: @Conodoperatorbot"
     )
 
+async def set_bot_commands(application):
+    """Set bot commands menu automatically"""
+    commands = [
+        BotCommand("start", "Սdelays delays delays delays delays"),
+        BotCommand("status", "Cdelays delays delays delays delays delays delays"),
+        BotCommand("check", "Cdelays delays delays delays delays delays delays"),
+        BotCommand("cancel", "Cdelays delays delays delays delays delays delays delays"),
+        BotCommand("help", "Odelays delays delays delays delays delays delays"),
+        BotCommand("operator", "Kdelays delays delays delays delays delays delays"),
+    ]
+    await application.bot.set_my_commands(commands)
+    print("✅ Bot commands menu set successfully!")
+
+
 def main():
-    application = Application.builder().token(settings.telegram_bot_token).build()
-    
+    application = Application.builder().token(settings.telegram_bot_token).post_init(set_bot_commands).build()
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
