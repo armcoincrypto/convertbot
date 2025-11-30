@@ -282,14 +282,47 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle unknown commands or messages"""
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show help message with all commands"""
     await update.message.reply_text(
-        "❌ Սխալ հրաման\n\n"
-        "Եթե չգիտեք ինչպես օգտագործել Conod բոտը,\n"
-        "կարող եք գրել մեր օպերատորին՝\n\n"
-        "📞 @Conodoperatorbot\n\n"
-        "Կամ սեղմեք /start նոր փոխանակման համար։"
+        "📚 Օdelays delays delays\n\n"
+        "💱 Hdelays delays delays delays delays\n"
+        "• ₿ Bitcoin → USDT\n"
+        "• Ł Litecoin → USDT\n"
+        "• 💎 Dash → USDT\n"
+        "• 💎 Dash → TRON\n"
+        "• 🔒 Monero → USDT\n\n"
+        "📋 Hdelays delays\n"
+        "/start    – Sdelays delays delays delays\n"
+        "/status   – Tdelays delays delays delays delays\n"
+        "/check    – Ndelays delays delays delays /status\n"
+        "/cancel   – Cdelays delays delays delays delays\n"
+        "/operator – Kdelays delays delays delays delays\n"
+        "/help     – Cdelays delays delays delays delays delays\n\n"
+        "⚠️ Ndelays delays delays: $20 USD\n"
+        "💰 Mdelays delays delays: 3% + $1"
+    )
+
+
+async def operator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Contact support operator"""
+    await update.message.reply_text(
+        "📞 Kdelays delays delays delays delays delays\n\n"
+        "Gdelays delays delays delays delays delays:\n"
+        "@Conodoperatorbot\n\n"
+        "Mdelays delays delays delays delays delays delays delays:"
+    )
+
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle unknown commands - show help"""
+    await update.message.reply_text(
+        "❓ Idelays delays delays delays delays delays delays delays\n\n"
+        "Odelays delays delays delays:\n"
+        "/start – Ndelays delays delays\n"
+        "/status – Tdelays delays delays delays\n"
+        "/help – Odelays delays delays\n\n"
+        "📞 Odelays delays: @Conodoperatorbot"
     )
 
 def main():
@@ -307,9 +340,14 @@ def main():
     
     application.add_handler(conv_handler)
 
-    # Handler for check button (outside conversation)
-
+    # Additional command handlers
+    application.add_handler(CommandHandler("status", check_transaction))
+    application.add_handler(CommandHandler("check", check_transaction))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("operator", operator_command))
     
+    # Handle unknown messages (outside conversation)
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 
     print("🤖 Bot starting...")
     print("📍 Supported swaps:")
