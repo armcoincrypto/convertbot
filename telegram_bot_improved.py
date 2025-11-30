@@ -350,7 +350,14 @@ def main():
             WAITING_TXID: [MessageHandler(filters.TEXT & ~filters.COMMAND, waiting_for_txid)],
             WAITING_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_received)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("status", check_transaction),
+            CommandHandler("check", check_transaction),
+            CommandHandler("help", help_command),
+            CommandHandler("operator", operator_command),
+            CommandHandler("start", start),
+        ],
     )
     
     application.add_handler(conv_handler)
