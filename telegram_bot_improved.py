@@ -362,6 +362,7 @@ async def referral_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎁 Bonuses:\n"
         f"{'✅' if '50_REFERRALS' in stats['bonuses_claimed'] else '⬜'} 50 active → +$50\n"
         f"{'✅' if '200_REFERRALS' in stats['bonuses_claimed'] else '⬜'} 200 active → +$200\n\n"
+        "💸 Withdraw your earnings: /withdraw\n\n"
         "Thank you for being with us! 🔥"
     )
 
