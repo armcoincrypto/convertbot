@@ -283,57 +283,58 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show help message with all commands"""
     await update.message.reply_text(
-        "📚 Օdelays delays delays\n\n"
-        "💱 Hdelays delays delays delays delays\n"
+        "📚 Help:\n\n"
+        "💱 Available exchanges:\n"
         "• ₿ Bitcoin → USDT\n"
         "• Ł Litecoin → USDT\n"
         "• 💎 Dash → USDT\n"
         "• 💎 Dash → TRON\n"
         "• 🔒 Monero → USDT\n\n"
-        "📋 Hdelays delays\n"
-        "/start    – Sdelays delays delays delays\n"
-        "/status   – Tdelays delays delays delays delays\n"
-        "/check    – Ndelays delays delays delays /status\n"
-        "/cancel   – Cdelays delays delays delays delays\n"
-        "/operator – Kdelays delays delays delays delays\n"
-        "/help     – Cdelays delays delays delays delays delays\n\n"
-        "⚠️ Ndelays delays delays: $20 USD\n"
-        "💰 Mdelays delays delays: 3% + $1"
+        "📋 Commands:\n"
+        "/start    – Start new exchange\n"
+        "/status   – Check transaction status\n"
+        "/check    – Same as /status\n"
+        "/cancel   – Cancel current operation\n"
+        "/operator – Contact support\n"
+        "/help     – Show this message\n\n"
+        "⚠️ Minimum: $20 USD\n"
+        "💰 Fee: 3% + $1"
     )
 
 
 async def operator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Contact support operator"""
     await update.message.reply_text(
-        "📞 Kdelays delays delays delays delays delays\n\n"
-        "Gdelays delays delays delays delays delays:\n"
+        "📞 Contact Support:\n\n"
+        "For assistance, contact:\n"
         "@Conodoperatorbot\n\n"
-        "Mdelays delays delays delays delays delays delays delays:"
+        "We respond within 24 hours."
     )
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown commands - show help"""
     await update.message.reply_text(
-        "❓ Idelays delays delays delays delays delays delays delays\n\n"
-        "Odelays delays delays delays:\n"
-        "/start – Ndelays delays delays\n"
-        "/status – Tdelays delays delays delays\n"
-        "/help – Odelays delays delays\n\n"
-        "📞 Odelays delays: @Conodoperatorbot"
+        "❓ Unknown command.\n\n"
+        "Available commands:\n"
+        "/start – Start new exchange\n"
+        "/status – Check transaction status\n"
+        "/help – Show all commands\n\n"
+        "📞 Support: @Conodoperatorbot"
     )
 
 async def set_bot_commands(application):
     """Set bot commands menu automatically"""
     commands = [
-        BotCommand("start", "Սdelays delays delays delays delays"),
-        BotCommand("status", "Cdelays delays delays delays delays delays delays"),
-        BotCommand("check", "Cdelays delays delays delays delays delays delays"),
-        BotCommand("cancel", "Cdelays delays delays delays delays delays delays delays"),
-        BotCommand("help", "Odelays delays delays delays delays delays delays"),
-        BotCommand("operator", "Kdelays delays delays delays delays delays delays"),
+        BotCommand("start", "Start new exchange"),
+        BotCommand("status", "Check transaction status"),
+        BotCommand("check", "Same as /status"),
+        BotCommand("cancel", "Cancel current operation"),
+        BotCommand("help", "Show all commands"),
+        BotCommand("operator", "Contact support"),
     ]
     await application.bot.set_my_commands(commands)
     print("✅ Bot commands menu set successfully!")
