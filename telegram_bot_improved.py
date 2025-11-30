@@ -368,6 +368,52 @@ async def referral_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message)
 
 
+async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Withdraw referral earnings"""
+    user_id = update.effective_user.id
+
+    # Get user's balance
+    stats = await get_referral_stats(user_id)
+    balance = stats['balance']
+
+    if balance < 10:
+        await update.message.reply_text(
+            f"💰 Your Referral Balance: ${balance:.2f}\n\n"
+            f"⚠️ Minimum withdrawal: $10\n"
+            f"You need ${10 - balance:.2f} more to withdraw.\n\n"
+            f"Invite friends with /referral to earn more!"
+        )
+        return
+
+    # Get user's saved address
+    async with aiosqlite.connect(get_db_path()) as conn:
+        async with conn.execute(
+            "SELECT usdt_trc20_address FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    saved_address = row[0] if row and row[0] else None
+
+    if saved_address:
+        await update.message.reply_text(
+            f"💰 Your Referral Balance: ${balance:.2f}\n\n"
+            f"📍 Withdraw to:\n<code>{saved_address}</code>\n\n"
+            f"Reply with:\n"
+            f"• <code>YES</code> to confirm withdrawal\n"
+            f"• Or send a different TRC20 address",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text(
+            f"💰 Your Referral Balance: ${balance:.2f}\n\n"
+            f"📍 Send your TRC20 (USDT) address to withdraw:",
+            parse_mode="HTML"
+        )
+
+    context.user_data['withdraw_pending'] = True
+    context.user_data['withdraw_balance'] = balance
+
+
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown commands - show help"""
     await update.message.reply_text(
@@ -389,9 +435,8 @@ async def set_bot_commands(application):
     commands = [
         BotCommand("start", "Start new exchange"),
         BotCommand("status", "Check transaction status"),
-        BotCommand("check", "Same as /status"),
         BotCommand("referral", "Earn 30% from referrals"),
-        BotCommand("cancel", "Cancel current operation"),
+        BotCommand("withdraw", "Withdraw referral earnings"),
         BotCommand("help", "Show all commands"),
         BotCommand("operator", "Contact support"),
     ]
@@ -414,6 +459,7 @@ def main():
             CommandHandler("status", check_transaction),
             CommandHandler("check", check_transaction),
             CommandHandler("referral", referral_command),
+            CommandHandler("withdraw", withdraw_command),
             CommandHandler("help", help_command),
             CommandHandler("operator", operator_command),
             CommandHandler("start", start),
@@ -426,6 +472,7 @@ def main():
     application.add_handler(CommandHandler("status", check_transaction))
     application.add_handler(CommandHandler("check", check_transaction))
     application.add_handler(CommandHandler("referral", referral_command))
+    application.add_handler(CommandHandler("withdraw", withdraw_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("operator", operator_command))
 
