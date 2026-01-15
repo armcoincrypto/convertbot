@@ -4,6 +4,7 @@ import aiosqlite
 from typing import Dict, Any
 from app.logger import setup_logger
 from app.config import settings
+from app.texts import TEXTS
 from app import db
 from app.db import get_db_path, get_user_referrer, add_referral_earning, check_and_award_bonus
 from app.models import DepositStatus, CoinType
@@ -158,7 +159,7 @@ async def worker_cycle() -> Dict[str, Any]:
                         await db.update_deposit_status(deposit.txid, DepositStatus.PROCESSING_ERROR)
                         await telegram.send_message(
                             deposit.user_id,
-                            "❌ Սխալ գործարք\n\nԱյս գործարքը չի գտնվել blockchain-ում։\nԽնդրում ենք ստուգել txid-ը։"
+                            TEXTS["error_fake_tx"]
                         )
                         continue
                     
@@ -324,16 +325,9 @@ async def worker_cycle() -> Dict[str, Any]:
                         # Notify user
                         try:
                             telegram_client = TelegramClient(settings.telegram_bot_token, settings.admin_chat_id)
-                            msg = (
-                                f"⚠️ Գումարը բավարար չէ\n\n"
-                                f"{error_msg}\n\n"
-                                f"💡 Նվազագույն $20 է պետք, որպեսզի\n"
-                                f"   հետո հանենք 3% + $1 միջնորդավճար։\n"
-                                f"   Դուք կստանաք ~$18 USDT\n\n"
-                                f"📱 Կապվեք օպերատորի հետ:\n"
-                                f"@Conodoperatorbot\n\n"
-                                f"Մենք կկատարենք փոխանակումը ձեռքով։\n\n"
-                                f"TXID: {deposit.txid[:16]}..."
+                            msg = TEXTS["error_amount_small"].format(
+                                error_msg=error_msg,
+                                txid=deposit.txid[:16] + "..."
                             )
                             await telegram_client.send_message(deposit.user_id, msg)
                             logger.info(f"✅ Sent 'contact operator' notification to user {deposit.user_id}")
@@ -343,13 +337,13 @@ async def worker_cycle() -> Dict[str, Any]:
                                 from libs.mexc_client import MEXCClient
                                 price = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret).get_ticker_price(f"{deposit.coin.value if hasattr(deposit.coin, 'value') else deposit.coin}USDT")
                                 usd_val = onchain_amount * price if price else 0
-                                operator_msg = (
-                                    f"🔔 ՈՒՇԱԴՐՈՒԹՅՈՒՆ: Փոքր գումար\n\n"
-                                    f"👤 User: {deposit.user_id}\n"
-                                    f"💰 Գումար: ${usd_val:.2f} ({onchain_amount} {deposit.coin.value if hasattr(deposit.coin, 'value') else deposit.coin})\n"
-                                    f"📍 Հասցե: {deposit.target_address}\n"
-                                    f"🔗 TXID: {deposit.txid[:32]}...\n\n"
-                                    f"Օգտատերը կապվելու է @Conodoperatorbot հետ։"
+                                operator_msg = TEXTS["admin_small_amount"].format(
+                                    user_id=deposit.user_id,
+                                    usd_val=f"{usd_val:.2f}",
+                                    amount=onchain_amount,
+                                    coin=deposit.coin.value if hasattr(deposit.coin, "value") else deposit.coin,
+                                    address=deposit.target_address,
+                                    txid=deposit.txid[:32] + "..."
                                 )
                                 await telegram_client.send_message(settings.admin_chat_id, operator_msg)
                                 logger.info(f"✅ Notified operator about small amount")

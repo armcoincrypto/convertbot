@@ -4,6 +4,7 @@ from typing import Optional
 from app.logger import setup_logger
 from app.models import Deposit, DepositStatus, CoinType
 from app.config import settings
+from app.texts import TEXTS
 from app import db
 from libs.mexc_client import MEXCClient
 from libs.telegram_client import TelegramClient
@@ -157,17 +158,17 @@ async def process_confirmed_deposit(deposit: Deposit) -> bool:
 async def _notify_success(deposit: Deposit, amount: float, coin: str, withdraw_id: str):
     """Notify user of successful withdrawal"""
     try:
-        message = f"✅ Փոխանակումը ավարտված է!\n\n"
-        message += f"💰 Ստացել եք: {amount:.2f} {coin}\n"
-        message += f"📍 Հասցե: {deposit.target_address}\n"
-        message += f"🆔 Withdrawal ID: {withdraw_id}\n\n"
-        message += f"Շնորհակալություն! 🎉"
-        
+        message = TEXTS["success_withdrawal"].format(
+            amount=f"{amount:.2f}",
+            coin=coin,
+            address=deposit.target_address,
+            wid=withdraw_id
+        )
+
         await telegram.send_message(deposit.user_id, message)
         logger.info(f"User {deposit.user_id} notified of success")
     except Exception as e:
         logger.error(f"Failed to notify user: {e}")
-
 
 async def _withdraw_as_trx(deposit: Deposit, usdt_amount: float) -> tuple:
     """Convert USDT to TRX and withdraw"""
@@ -208,18 +209,31 @@ async def _withdraw_as_trx(deposit: Deposit, usdt_amount: float) -> tuple:
 
 
 async def _notify_error(deposit: Deposit, error: str):
-    """Notify user of error"""
+    """Notify user of error - with rate limiting"""
+    import time
+
+    txid = deposit.txid
+    now = time.time()
+
+    # Rate limit: skip if notified recently
+    if not hasattr(_notify_error, '_times'):
+        _notify_error._times = {}
+    if now - _notify_error._times.get(txid, 0) < 3600:
+        logger.info(f"Skipping notification for {txid[:16]}... (rate limited)")
+        return
+
+    _notify_error._times[txid] = now
+
     try:
-        message = f"⚠️ Խնդիր է առաջացել\n\n"
-        message += f"Գործարք: {deposit.txid[:16]}...\n"
-        message += f"Պատճառ: {error}\n\n"
-        message += f"Մենք կուղղենք խնդիրը շուտով։"
-        
+        message = TEXTS["error_generic"].format(
+            txid=txid[:16] + "...",
+            error=error
+        )
+
         await telegram.send_message(deposit.user_id, message)
         logger.info(f"User {deposit.user_id} notified of error")
     except Exception as e:
         logger.error(f"Failed to notify user: {e}")
-
 
 async def withdraw_usdt_only(deposit: Deposit) -> bool:
     """Withdraw USDT/TRX for an already-sold deposit (BTC/LTC/DASH after full confirmations)"""
