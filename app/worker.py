@@ -20,6 +20,14 @@ telegram = TelegramClient(settings.telegram_bot_token, settings.admin_chat_id)
 # Add early sell tracking
 EARLY_SOLD_AMOUNTS = {}  # txid -> usdt_amount
 
+# Track error notifications to avoid spam (txid -> last_notified_timestamp)
+ERROR_NOTIFICATIONS = {}  # txid -> timestamp
+ERROR_NOTIFICATION_COOLDOWN = 3600  # Only notify once per hour for same error
+
+# Track retry counts for TRADE_FAILED
+TRADE_FAILED_RETRIES = {}  # txid -> count
+MAX_TRADE_RETRIES = 5  # After this, mark as NEEDS_MANUAL
+
 
 async def cleanup_old_deposits():
     """Delete deposits older than 1 hour with no confirmations"""
@@ -43,6 +51,17 @@ async def cleanup_old_deposits():
             logger.info(f"🧹 Cleaned up {deleted} old unconfirmed deposits")
 
 
+def should_send_error_notification(txid: str) -> bool:
+    """Check if enough time has passed to send another error notification"""
+    import time
+    now = time.time()
+    last_notified = ERROR_NOTIFICATIONS.get(txid, 0)
+    if now - last_notified >= ERROR_NOTIFICATION_COOLDOWN:
+        ERROR_NOTIFICATIONS[txid] = now
+        return True
+    return False
+
+
 async def retry_trade_failed_deposits():
     """Retry deposits stuck in TRADE_FAILED status - only if deposit is on MEXC"""
     try:
@@ -58,16 +77,43 @@ async def retry_trade_failed_deposits():
 
         retried = 0
         for deposit in trade_failed:
+            txid = deposit.txid
             coin_str = deposit.coin.value if hasattr(deposit.coin, 'value') else str(deposit.coin)
 
+            # Check retry count
+            retry_count = TRADE_FAILED_RETRIES.get(txid, 0)
+            if retry_count >= MAX_TRADE_RETRIES:
+                logger.warning(f"   ⛔ {txid[:16]}... exceeded {MAX_TRADE_RETRIES} retries - needs manual fix")
+                # Only notify admin once per hour
+                if should_send_error_notification(txid):
+                    await telegram.send_message(
+                        settings.admin_chat_id,
+                        f"⚠️ MANUAL FIX NEEDED\n\n"
+                        f"Deposit {txid[:16]}... failed {retry_count} times.\n"
+                        f"Coin: {coin_str}\n"
+                        f"User: {deposit.user_id}\n"
+                        f"Address: {deposit.target_address}"
+                    )
+                continue
+
             # CRITICAL: Only retry if deposit is actually credited on MEXC
-            logger.info(f"   → Checking {deposit.txid[:16]}... ({coin_str})")
-            is_on_mexc, mexc_amount = mexc.verify_deposit_on_mexc(coin_str, deposit.txid)
+            logger.info(f"   → Checking {txid[:16]}... ({coin_str}) [retry #{retry_count + 1}]")
+            is_on_mexc, mexc_amount = mexc.verify_deposit_on_mexc(coin_str, txid)
 
             if is_on_mexc and mexc_amount:
-                logger.info(f"   ✅ Deposit is on MEXC ({mexc_amount} {coin_str}), retrying...")
-                await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED)
-                retried += 1
+                # Check if we have enough balance to sell
+                has_balance, available = mexc.check_coin_balance(coin_str, mexc_amount * 0.99)
+
+                if has_balance:
+                    logger.info(f"   ✅ Deposit is on MEXC ({mexc_amount} {coin_str}), retrying...")
+                    await db.update_deposit_status(txid, DepositStatus.CONFIRMED)
+                    TRADE_FAILED_RETRIES[txid] = retry_count + 1
+                    retried += 1
+                else:
+                    # Balance insufficient - might have been sold already
+                    logger.warning(f"   ⚠️ MEXC has deposit but balance low ({available} < {mexc_amount})")
+                    logger.warning(f"   💡 Might have been sold already - check manually")
+                    TRADE_FAILED_RETRIES[txid] = retry_count + 1
             else:
                 logger.warning(f"   ⏳ Deposit NOT on MEXC yet, skipping retry")
 
