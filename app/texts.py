@@ -1,47 +1,57 @@
 """
 Localized text strings for the bot.
 
-IMPORTANT: This file contains all user-facing messages.
-To change to Armenian, edit this file directly on VPS.
-Claude should NEVER modify the text values - only reference keys.
+ARCHITECTURE:
+- This file contains ASCII-only placeholder text
+- To add Armenian: edit this file directly on VPS
+- Claude will NEVER modify text values - only reference keys
+
+KEYS:
+- error_generic: Generic error notification to user
+- error_fake_tx: Transaction not found on blockchain
+- error_amount_small: Deposit amount below minimum
+- success_withdrawal: Successful withdrawal notification
+- success_deposit_confirmed: Deposit confirmed notification
+- admin_manual_fix: Admin alert for manual intervention
+- admin_small_amount: Admin alert for small deposit
 """
 
 TEXTS = {
-    # Error messages
+    # User error messages
     "error_generic": (
-        "Error occurred\n\n"
+        "[ERROR]\n\n"
         "Transaction: {txid}\n"
         "Reason: {error}\n\n"
-        "We will fix this soon."
+        "We are working on this issue."
     ),
 
     "error_fake_tx": (
-        "Invalid transaction\n\n"
+        "[INVALID TRANSACTION]\n\n"
         "This transaction was not found on blockchain.\n"
-        "Please check the txid."
+        "Please verify your TXID."
     ),
 
     "error_amount_small": (
-        "Amount too small\n\n"
+        "[AMOUNT TOO SMALL]\n\n"
         "{error_msg}\n\n"
-        "Minimum is $20 to cover fees.\n"
-        "You would receive ~$18 USDT.\n\n"
-        "Contact operator: @Conodoperatorbot\n"
+        "Minimum: $20 USD\n"
+        "Fee: 3% + $1\n\n"
+        "Contact support: @Conodoperatorbot\n"
         "We will process manually.\n\n"
         "TXID: {txid}"
     ),
 
     # Success messages
     "success_withdrawal": (
-        "Exchange complete!\n\n"
-        "You received: {amount} {coin}\n"
+        "[SUCCESS]\n\n"
+        "Received: {amount} {coin}\n"
         "Address: {address}\n"
         "Withdrawal ID: {wid}\n\n"
         "Thank you!"
     ),
 
     "success_deposit_confirmed": (
-        "Deposit confirmed!\n"
+        "[DEPOSIT CONFIRMED]\n"
         "TxID: {txid}\n"
         "Coin: {coin}\n"
         "Confirmations: {confs}"
@@ -49,7 +59,7 @@ TEXTS = {
 
     # Admin notifications
     "admin_manual_fix": (
-        "MANUAL FIX NEEDED\n\n"
+        "[MANUAL FIX NEEDED]\n\n"
         "Deposit {txid} failed {retries} times.\n"
         "Coin: {coin}\n"
         "User: {user_id}\n"
@@ -57,15 +67,11 @@ TEXTS = {
     ),
 
     "admin_small_amount": (
-        "ATTENTION: Small amount\n\n"
+        "[SMALL AMOUNT ALERT]\n\n"
         "User: {user_id}\n"
         "Amount: ${usd_val} ({amount} {coin})\n"
         "Address: {address}\n"
         "TXID: {txid}\n\n"
         "User will contact @Conodoperatorbot"
     ),
-
-    # Withdrawal errors
-    "withdrawal_failed": "Withdrawal failed: {error}",
-    "withdrawal_error": "Withdrawal error: {error}",
 }
