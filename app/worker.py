@@ -188,10 +188,16 @@ async def worker_cycle() -> Dict[str, Any]:
                         continue
                     
                     logger.info(f"✅ Got {confs} confirmations from blockchain")
-                    
-                    # Two-stage system: Sell at minimum confs ONLY if on MEXC
-                    EARLY_SELL_CONFS = 2 if deposit.coin != CoinType.DASH else deposit.required_confs
-                    
+
+                    # Two-stage system: Sell early for price protection, withdraw after full confs
+                    # Early sell confirmations (sell to lock in price)
+                    EARLY_SELL_CONFS = {
+                        CoinType.BTC: 2,   # BTC: sell at 2 confs
+                        CoinType.LTC: 2,   # LTC: sell at 2 confs
+                        CoinType.DASH: 7,  # DASH: sell at 7 confs (of 12 required)
+                        CoinType.XMR: 10,  # XMR: handled via MEXC deposit history
+                    }.get(deposit.coin, 2)
+
                     if confs >= EARLY_SELL_CONFS and deposit.status == DepositStatus.CONFIRMING:
                         logger.info(f"💰 EARLY SELL! Processing at {confs} confs (price protection)")
                         await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED, confs)
