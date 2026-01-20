@@ -52,9 +52,21 @@ async def init_db():
                 target_address TEXT,
                 onchain_amount REAL,
                 usdt_amount REAL,
-                final_usdt REAL
+                final_usdt REAL,
+                output_coin TEXT DEFAULT 'USDT',
+                retry_count INTEGER DEFAULT 0
             )
         """)
+        # Add retry_count column if missing (for existing databases)
+        try:
+            await conn.execute("ALTER TABLE deposits ADD COLUMN retry_count INTEGER DEFAULT 0")
+        except:
+            pass  # Column already exists
+        # Add output_coin column if missing
+        try:
+            await conn.execute("ALTER TABLE deposits ADD COLUMN output_coin TEXT DEFAULT 'USDT'")
+        except:
+            pass  # Column already exists
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -289,7 +301,7 @@ async def create_withdrawal(txid: str, user_id: int, coin: str, amount: float,
         logger.info(f"Created withdrawal record: {withdraw_id}")
 
 
-async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float, 
+async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float,
                               final_amount: float, fee: float, trade_order_id: str) -> None:
     """Record withdrawal details."""
     async with aiosqlite.connect(get_db_path()) as conn:
@@ -299,3 +311,41 @@ async def add_withdrawal_info(txid: str, withdrawal_id: str, amount_usdt: float,
         """, (txid, withdrawal_id, amount_usdt, final_amount, fee, trade_order_id))
         await conn.commit()
     logger.info(f"Added withdrawal info for {txid}")
+
+
+async def get_retry_count(txid: str) -> int:
+    """Get retry count for a deposit."""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        async with conn.execute(
+            "SELECT retry_count FROM deposits WHERE txid = ?", (txid,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    return row[0] if row and row[0] else 0
+
+
+async def increment_retry_count(txid: str) -> int:
+    """Increment retry count and return new value."""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        await conn.execute(
+            "UPDATE deposits SET retry_count = COALESCE(retry_count, 0) + 1, updated_at = ? WHERE txid = ?",
+            (datetime.utcnow().isoformat(), txid)
+        )
+        await conn.commit()
+        async with conn.execute(
+            "SELECT retry_count FROM deposits WHERE txid = ?", (txid,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    new_count = row[0] if row else 1
+    logger.info(f"Incremented retry count for {txid[:16]}... to {new_count}")
+    return new_count
+
+
+async def reset_retry_count(txid: str) -> None:
+    """Reset retry count to 0."""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        await conn.execute(
+            "UPDATE deposits SET retry_count = 0, updated_at = ? WHERE txid = ?",
+            (datetime.utcnow().isoformat(), txid)
+        )
+        await conn.commit()
+    logger.info(f"Reset retry count for {txid[:16]}...")

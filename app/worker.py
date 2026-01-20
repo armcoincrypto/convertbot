@@ -50,25 +50,78 @@ async def cleanup_old_deposits():
             logger.info(f"🧹 Cleaned up {deleted} old unconfirmed deposits")
 
 
+MAX_TRADE_RETRIES = 5  # Maximum retry attempts before manual intervention
+
+
 async def retry_trade_failed_deposits():
-    """Retry deposits stuck in TRADE_FAILED status"""
+    """Retry deposits stuck in TRADE_FAILED status with smart retry logic"""
     try:
         logger.info("🔄 Checking for TRADE_FAILED deposits to retry...")
-        
+
         trade_failed = await db.get_deposits_by_status(DepositStatus.TRADE_FAILED)
-        
+
         if not trade_failed:
             logger.info("✅ No TRADE_FAILED deposits to retry")
             return
-        
-        logger.info(f"🔁 Found {len(trade_failed)} TRADE_FAILED deposits, resetting to CONFIRMED...")
-        
+
+        logger.info(f"🔁 Found {len(trade_failed)} TRADE_FAILED deposits, checking MEXC...")
+
+        retried = 0
         for deposit in trade_failed:
-            logger.info(f"   → Retrying {deposit.txid[:16]}... ({deposit.coin.value})")
-            await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED)
-        
-        logger.info(f"✅ Reset {len(trade_failed)} deposits to CONFIRMED for retry")
-        
+            txid_short = deposit.txid[:16]
+            coin_str = deposit.coin.value if hasattr(deposit.coin, 'value') else str(deposit.coin)
+
+            # Check retry count
+            retry_count = await db.get_retry_count(deposit.txid)
+
+            if retry_count >= MAX_TRADE_RETRIES:
+                logger.warning(f"   ⛔ {txid_short}... exceeded {MAX_TRADE_RETRIES} retries - needs manual fix")
+                # Notify admin once (check if already notified by looking at status)
+                try:
+                    admin_msg = (
+                        f"🚨 MANUAL FIX REQUIRED\n\n"
+                        f"Deposit exceeded {MAX_TRADE_RETRIES} retries:\n"
+                        f"TXID: {deposit.txid[:32]}...\n"
+                        f"Coin: {coin_str}\n"
+                        f"User: {deposit.user_id}\n"
+                        f"Address: {deposit.target_address}\n\n"
+                        f"Check MEXC balance and process manually."
+                    )
+                    # Only notify if this is the first time hitting max retries
+                    if retry_count == MAX_TRADE_RETRIES:
+                        await telegram.send_message(settings.admin_chat_id, admin_msg)
+                        logger.info(f"   📧 Admin notified about max retries")
+                except Exception as e:
+                    logger.error(f"   ❌ Failed to notify admin: {e}")
+                continue
+
+            # Check if coin is on MEXC before retrying
+            try:
+                balances = mexc.get_account_balance()
+                coin_balance = balances.get(coin_str, {}).get('free', 0)
+
+                if coin_balance <= 0:
+                    logger.info(f"   ⏳ {txid_short}... no {coin_str} balance on MEXC, waiting...")
+                    continue
+
+                logger.info(f"   ✅ {txid_short}... has {coin_balance} {coin_str} on MEXC, retrying (attempt {retry_count + 1}/{MAX_TRADE_RETRIES})")
+
+                # Increment retry count before retrying
+                await db.increment_retry_count(deposit.txid)
+
+                # Reset to CONFIRMED for retry
+                await db.update_deposit_status(deposit.txid, DepositStatus.CONFIRMED)
+                retried += 1
+
+            except Exception as e:
+                logger.error(f"   ❌ Error checking MEXC balance for {txid_short}...: {e}")
+                continue
+
+        if retried > 0:
+            logger.info(f"✅ Reset {retried} deposits to CONFIRMED for retry")
+        else:
+            logger.info(f"⏳ No deposits ready for retry (waiting for MEXC credit)")
+
     except Exception as e:
         logger.error(f"❌ Error retrying TRADE_FAILED deposits: {e}")
 

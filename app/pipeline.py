@@ -88,6 +88,9 @@ async def process_confirmed_deposit(deposit: Deposit) -> bool:
                 
                 usdt_amount = trade_result['usdt_received']
                 logger.info(f"✅ Trade complete: {usdt_amount:.2f} USDT received")
+
+                # Reset retry count on successful trade
+                await db.reset_retry_count(deposit.txid)
         
         # Step 3: Calculate fees
         network_fee = 1.0

@@ -8,7 +8,11 @@ CREATE TABLE IF NOT EXISTS deposits (
     inserted_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     target_address TEXT,
-    onchain_amount NUMERIC(38,18)
+    onchain_amount NUMERIC(38,18),
+    usdt_amount NUMERIC(38,8),
+    final_usdt NUMERIC(38,8),
+    output_coin TEXT DEFAULT 'USDT',
+    retry_count INT DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS users (

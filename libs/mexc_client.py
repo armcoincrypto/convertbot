@@ -16,20 +16,24 @@ class MEXCClient:
         self.base_url = "https://api.mexc.com"
 
 
-    def _quantize_amount(self, coin: str, amount: float) -> float:
-        """Round DOWN to valid step size for MEXC"""
-        # MEXC step sizes (from exchange info)
-        step_sizes = {
-            'BTC': 0.00001,
-            'LTC': 0.01,
-            'DASH': 0.01,
-            'XMR': 0.01,
-            'USDT': 0.01,
-            'USDC': 0.01
+    def _quantize_amount(self, coin: str, amount: float) -> str:
+        """Round DOWN to valid step size for MEXC and return as string with correct decimals"""
+        # MEXC step sizes and decimal places (from exchange info)
+        # Format: (step_size, decimal_places)
+        coin_precision = {
+            'BTC': (0.00001, 5),
+            'LTC': (0.01, 2),
+            'DASH': (0.01, 2),
+            'XMR': (0.001, 3),
+            'USDT': (0.01, 2),
+            'USDC': (0.01, 2),
+            'TRX': (0.01, 2)
         }
-        step = step_sizes.get(coin, 0.01)
+        step, decimals = coin_precision.get(coin, (0.01, 2))
         # Round DOWN to nearest step
-        return float(int(amount / step) * step)
+        quantized = float(int(amount / step) * step)
+        # Return as string with exact decimal places (no scientific notation)
+        return f"{quantized:.{decimals}f}"
 
     def _sign(self, params_string: str) -> str:
         """Generate signature for authenticated requests"""
@@ -154,49 +158,51 @@ class MEXCClient:
             }
         
         symbol = f"{coin_str}USDT"
-        
+
         try:
-            precision = {'BTC': 6, 'LTC': 4, 'DASH': 2, 'XMR': 3, 'TRX': 2}
-            decimals = precision.get(coin_str, 6)
-            # Use 99% to avoid rounding issues
-            amount = round(amount * 0.99, decimals)
-            
+            # Quantize amount FIRST (returns string with correct decimals)
+            qty_str = self._quantize_amount(coin_str, amount)
+            qty_float = float(qty_str)
+
+            if qty_float <= 0:
+                return False, {'error': f'Amount too small after quantization: {amount} -> {qty_str}'}
+
             balances_before = self.get_account_balance()
             usdt_before = balances_before.get('USDT', {}).get('free', 0)
-            
+
             timestamp = str(int(time.time() * 1000))
-            params = f"quantity={amount}&recvWindow=5000&side=SELL&symbol={symbol}&timestamp={timestamp}&type=MARKET"
+            # Use quantized string in params to ensure correct format
+            params = f"quantity={qty_str}&recvWindow=5000&side=SELL&symbol={symbol}&timestamp={timestamp}&type=MARKET"
             signature = self._sign(params)
-            
+
             url = f"{self.base_url}/api/v3/order?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
-            
-            amount = self._quantize_amount(coin_str, amount)
-            print(f"📤 Placing SELL order: {amount} {coin_str} → {symbol}")
+
+            print(f"📤 Placing SELL order: {qty_str} {coin_str} → {symbol}")
             response = requests.post(url, headers=headers)
             
             if response.status_code == 200:
                 data = response.json()
                 order_id = data.get('orderId', 'N/A')
-                
+
                 time.sleep(2)
-                
+
                 balances_after = self.get_account_balance()
                 usdt_after = balances_after.get('USDT', {}).get('free', 0)
                 usdt_received = usdt_after - usdt_before
-                
-                print(f"✅ Sold {amount} {coin_str} → {usdt_received:.2f} USDT")
-                
+
+                print(f"✅ Sold {qty_str} {coin_str} → {usdt_received:.2f} USDT")
+
                 return True, {
                     'order_id': order_id,
                     'usdt_received': usdt_received,
-                    'avg_price': usdt_received / amount if amount > 0 else 0
+                    'avg_price': usdt_received / qty_float if qty_float > 0 else 0
                 }
             else:
                 error = f"{response.status_code}: {response.text}"
                 print(f"❌ Trade failed: {error}")
                 return False, {'error': error}
-                
+
         except Exception as e:
             error = str(e)
             print(f"❌ Exception: {error}")
@@ -244,35 +250,39 @@ class MEXCClient:
         """Buy crypto with USDT (market order)"""
         coin_str = coin if isinstance(coin, str) else coin.value if hasattr(coin, 'value') else str(coin)
         symbol = f"{coin_str}USDT"
-        
+
         try:
             price = self.get_ticker_price(symbol)
             if not price:
                 return False, {'error': 'Could not get price'}
-            
-            precision = {'TRX': 2, 'BTC': 6, 'LTC': 4, 'DASH': 2}
-            decimals = precision.get(coin_str, 2)
-            amount = round(usdt_amount / price, decimals)
-            
+
+            # Calculate amount and quantize properly
+            raw_amount = usdt_amount / price
+            qty_str = self._quantize_amount(coin_str, raw_amount)
+            qty_float = float(qty_str)
+
+            if qty_float <= 0:
+                return False, {'error': f'Amount too small: {raw_amount} -> {qty_str}'}
+
             timestamp = str(int(time.time() * 1000))
-            params = f"quantity={amount}&recvWindow=5000&side=BUY&symbol={symbol}&timestamp={timestamp}&type=MARKET"
+            params = f"quantity={qty_str}&recvWindow=5000&side=BUY&symbol={symbol}&timestamp={timestamp}&type=MARKET"
             signature = self._sign(params)
-            
+
             url = f"{self.base_url}/api/v3/order?{params}&signature={signature}"
             headers = {"X-MEXC-APIKEY": self.api_key}
-            
-            print(f"📤 Placing BUY order: {amount} {coin_str} → {symbol}")
+
+            print(f"📤 Placing BUY order: {qty_str} {coin_str} → {symbol}")
             response = requests.post(url, headers=headers)
-            
+
             if response.status_code == 200:
                 data = response.json()
-                print(f"✅ Bought {amount} {coin_str}")
-                return True, {'order_id': data.get('orderId'), 'amount': amount}
+                print(f"✅ Bought {qty_str} {coin_str}")
+                return True, {'order_id': data.get('orderId'), 'amount': qty_float}
             else:
                 error = f"{response.status_code}: {response.text}"
                 print(f"❌ Buy failed: {error}")
                 return False, {'error': error}
-                
+
         except Exception as e:
             print(f"❌ Exception: {e}")
             return False, {'error': str(e)}
@@ -311,17 +321,23 @@ class MEXCClient:
         """Generic trading pair method"""
         try:
             # Use proper precision for each pair (from MEXC API rules)
-            precision = {
-                'BTCUSDC': 6,  # MEXC baseSizePrecision: 0.000001
-                'USDCUSDT': 2  # MEXC quotePrecision: 2
+            # Maps symbol to (step_size, decimals)
+            pair_precision = {
+                'BTCUSDC': (0.00001, 5),
+                'USDCUSDT': (0.01, 2)
             }
-            decimals = precision.get(symbol, 6)
-            amount = round(amount, decimals)
-            
+            step, decimals = pair_precision.get(symbol, (0.01, 2))
+            # Round DOWN to step size
+            quantized = float(int(amount / step) * step)
+            qty_str = f"{quantized:.{decimals}f}"
+
+            if quantized <= 0:
+                return False, {'error': f'Amount too small: {amount} -> {qty_str}'}
+
             balances_before = self.get_account_balance()
-            
+
             timestamp = str(int(time.time() * 1000))
-            params = f"quantity={amount}&recvWindow=5000&side={side}&symbol={symbol}&timestamp={timestamp}&type=MARKET"
+            params = f"quantity={qty_str}&recvWindow=5000&side={side}&symbol={symbol}&timestamp={timestamp}&type=MARKET"
             signature = self._sign(params)
             
             url = f"{self.base_url}/api/v3/order?{params}&signature={signature}"
