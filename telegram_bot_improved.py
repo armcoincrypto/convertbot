@@ -10,7 +10,12 @@ from app.models import CoinType
 import aiosqlite
 import re
 
+# Configure logging - reduce httpx spam
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 CHOOSING_COIN, WAITING_TXID, WAITING_ADDRESS = range(3)
 
@@ -31,89 +36,81 @@ COIN_INFO = {
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Clear any previous conversation data
+    context.user_data.clear()
+
     keyboard = [
-        [KeyboardButton("₿ Bitcoin → USDT"), KeyboardButton("Ł Litecoin → USDT")],
-        [KeyboardButton("💎 Dash → USDT"), KeyboardButton("💎 Dash → TRON")],
-        [KeyboardButton("🔒 Monero → USDT")],
-        [KeyboardButton("📊 Ստուգել գործարքը")],
+        [KeyboardButton("Bitcoin -> USDT"), KeyboardButton("Litecoin -> USDT")],
+        [KeyboardButton("Dash -> USDT"), KeyboardButton("Dash -> TRON")],
+        [KeyboardButton("Monero -> USDT")],
+        [KeyboardButton("Check Status")],
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "👋 Բարև: Ուրախ եմ աշխատել քեզ համար։\n"
-        "\n⚠️ Նվազագույն գումար: $20 USD\n"
-        "💡 Միջնորդավճար: 3% + $1\n"
-        "✌️ Ընտրեք փոխանակման տեսակը:",
+        "Welcome to Conod Bot!\n\n"
+        "Minimum: $20 USD\n"
+        "Fee: 3% + $1\n\n"
+        "Select exchange type:",
         reply_markup=reply_markup
     )
     return CHOOSING_COIN
 
 async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    
-    # Check if user clicked "Check transaction"
-    if "📊 Ստուգել" in text or "Ստուգել գործարքը" in text:
+
+    # Check if user clicked "Check Status"
+    if "Check" in text or "Status" in text:
         await check_transaction(update, context)
         return ConversationHandler.END
-    
+
     coin = None
     output_coin = "USDT"
     coin_key = None
-    
-    if "Bitcoin" in text and "USDT" in text:
+
+    if "Bitcoin" in text:
         coin = "BTC"
         output_coin = "USDT"
         coin_key = "BTC"
-    elif "Litecoin" in text and "USDT" in text:
+    elif "Litecoin" in text:
         coin = "LTC"
         output_coin = "USDT"
         coin_key = "LTC"
-    elif "Dash" in text and "USDT" in text:
-        coin = "DASH"
-        output_coin = "USDT"
-        coin_key = "DASH"
     elif "Dash" in text and "TRON" in text:
         coin = "DASH"
         output_coin = "TRX"
         coin_key = "DASH_TRX"
-    elif "Monero" in text and "USDT" in text:
+    elif "Dash" in text and "USDT" in text:
+        coin = "DASH"
+        output_coin = "USDT"
+        coin_key = "DASH"
+    elif "Monero" in text:
         coin = "XMR"
         output_coin = "USDT"
         coin_key = "XMR"
-    elif "Ստուգել" in text or "📊" in text:
-        return await check_transaction(update, context)
-    elif "/start" in text or "Նոր փոխանակում" in text:
-        await start(update, context)
-        return ConversationHandler.END
-    
+
     if not coin:
-        await update.message.reply_text("Խնդրում ենք ընտրել վերևի կոճակներից:")
+        await update.message.reply_text("Please select from the buttons above or /start to restart.")
         return CHOOSING_COIN
-    elif "Ստուգել գործարքը" in text or "📊" in text:
-        return await check_transaction(update, context)
-    
-    if not coin:
-        await update.message.reply_text("Խնդրում ենք ընտրել վերևի կոճակներից:")
-        return CHOOSING_COIN
-    
+
     context.user_data["coin"] = coin
     context.user_data["output_coin"] = output_coin
     context.user_data["coin_key"] = coin_key
-    
+
     info = COIN_INFO[coin_key]
     address = DEPOSIT_ADDRESSES[coin]
-    
-    keyboard = [[KeyboardButton("Ես ուղարկել եմ ✅")]]
+
+    keyboard = [[KeyboardButton("I have sent")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-    
+
     await update.message.reply_text(
-        f"Ձեր վճարման հասցեն:\n\n"
+        f"Your deposit address:\n\n"
         f"<code>{address}</code>\n\n"
-        f"💱 Դուք ընտրեցիք {info['name']} → {output_coin}\n"
-        f"🌐 Ցանց: {info['network']}\n"
-        f"✅ Հաստատումներ: {info['confs']}\n"
-        f"💰 Գանձարկվում է 3% միջնորդավճար\n"
-        f"⏱ Միջին տևողություն: 20–30 րոպե\n\n"
-        f"Ուղարկելուց հետո սեղմեք «Ես ուղարկել եմ» կոճակը։",
+        f"You selected: {info['name']} -> {output_coin}\n"
+        f"Network: {info['network']}\n"
+        f"Confirmations: {info['confs']}\n"
+        f"Fee: 3%\n"
+        f"Time: 20-30 minutes\n\n"
+        f"After sending, click 'I have sent'.",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
@@ -121,54 +118,50 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    
-    if "Ես ուղարկել եմ" in text:
+
+    if "I have sent" in text or "sent" in text.lower():
         await update.message.reply_text(
-            "Ստացվեց ✅\n\n"
-            "Խնդրում ենք ուղարկել գործարքի HASH-ը (64 նիշ):\n\n"
-            "Օրինակ:\n"
+            "Please send the transaction HASH (64 characters):\n\n"
+            "Example:\n"
             "<code>a65b33369cf0bcd1b4e7a47f00e6536612210aeb0ddb4e6ac557c9f83d316545</code>",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardRemove()
         )
         return WAITING_TXID
-    
+
     clean_text = text.strip().lower()
     if re.match(r"^[a-f0-9]{64}$", clean_text):
         # Check if TXID already exists
-        import aiosqlite
         async with aiosqlite.connect("swapbot.db") as conn:
             async with conn.execute("SELECT txid FROM deposits WHERE txid = ?", (clean_text,)) as cursor:
                 existing = await cursor.fetchone()
-        
+
         if existing:
             await update.message.reply_text(
-                "❌ Այս գործարքը արդեն օգտագործվել է։\n\n"
-                "Խնդրում ենք ուղարկել ՆՈՐ գործարքի HASH:\n\n"
-                "Օրինակ:\n"
-                "<code>6559ce2924b306bde3ca6433b92e9bac94821f587fda74ada758fd8477cf4f16</code>",
+                "This transaction has already been used.\n\n"
+                "Please send a NEW transaction HASH.",
                 parse_mode="HTML"
             )
             return WAITING_TXID
-        
+
         context.user_data["txid"] = clean_text
         output_coin = context.user_data.get("output_coin", "USDT")
-        
+
         network = "TRC20" if output_coin in ["USDT", "TRX"] else "Tron"
-        
+
         await update.message.reply_text(
-            f"TXID ստացվել է ✅\n\n"
+            f"TXID received!\n\n"
             f"<code>{clean_text[:32]}\n{clean_text[32:]}</code>\n\n"
-            f"Հիմա խնդրում ենք ուղարկել ձեր {output_coin} ({network}) ստացման հասցեն:\n\n"
-            f"Օրինակ:\n"
+            f"Now please send your {output_coin} ({network}) receiving address:\n\n"
+            f"Example:\n"
             f"<code>TVQXrLPpULB6y4KnJMyZorxWQqR7UhhL3g</code>",
             parse_mode="HTML"
         )
         return WAITING_ADDRESS
     else:
         await update.message.reply_text(
-            "❌ Սխալ ձևաչափ։\n\n"
-            "TXID-ն պետք է լինի 64 նիշ (0-9, a-f)։",
+            "Invalid format.\n\n"
+            "TXID must be 64 characters (0-9, a-f).",
             parse_mode="HTML"
         )
         return WAITING_TXID
@@ -176,197 +169,199 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     address = update.message.text.strip()
     user_id = update.message.from_user.id
-    
+
     if not (address.startswith("T") and len(address) == 34):
         await update.message.reply_text(
-            "❌ Սխալ հասցե։\n\n"
-            "TRC20 հասցեն պետք է սկսվի T տառով և լինի 34 նիշ։",
+            "Invalid address.\n\n"
+            "TRC20 address must start with T and be 34 characters.",
             parse_mode="HTML"
         )
         return WAITING_ADDRESS
-    
+
     coin = context.user_data.get("coin")
     txid = context.user_data.get("txid")
-    
+
+    if not coin or not txid:
+        await update.message.reply_text("Session expired. Please /start again.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
     # Check if TXID already used
     if await txid_exists(txid):
         owner_id = await get_txid_owner(txid)
         if owner_id == user_id:
-            await update.message.reply_text(
-                "⚠️ Այս գործարքը արդեն օգտագործվել է։\nԽնդրում ենք ուղարկել ՆՈՐ գործարք"
-            )
+            await update.message.reply_text("This transaction has already been used by you.")
         else:
-            await update.message.reply_text(
-                "❌ Այս գործարքն արդեն օգտագործված է այլ օգտատիրոջ կողմից"
-            )
+            await update.message.reply_text("This transaction has already been used by another user.")
         context.user_data.clear()
         return ConversationHandler.END
+
     output_coin = context.user_data.get("output_coin", "USDT")
     coin_key = context.user_data.get("coin_key")
-    
+
     async with aiosqlite.connect("swapbot.db") as conn:
         await conn.execute(
             "INSERT OR REPLACE INTO users (user_id, usdt_trc20_address) VALUES (?, ?)",
             (user_id, address)
         )
-        
+
         info = COIN_INFO[coin_key]
         target_address = address
-        
+
         await conn.execute(
-            """INSERT OR IGNORE INTO deposits 
+            """INSERT OR IGNORE INTO deposits
                (txid, coin, user_id, status, confs, required_confs, target_address, output_coin)
                VALUES (?, ?, ?, 'NEW', 0, ?, ?, ?)""",
             (txid, coin, user_id, info['confs'], target_address, output_coin)
         )
         await conn.commit()
-    
-    keyboard = [[KeyboardButton("🔄 Նոր փոխանակում /start"), KeyboardButton("📊 Ստուգել")]]
+
+    keyboard = [[KeyboardButton("/start"), KeyboardButton("Check Status")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
+
     await update.message.reply_text(
-        f"✅ Պահպանվեց {output_coin} հասցեն:\n"
+        f"Saved {output_coin} address:\n"
         f"<code>{address}</code>\n\n"
-        f"🔎 Սկսում ենք ստուգել ձեր փոխանցումը։\n\n"
-        f"📊 Գործարքի տվյալներ:\n"
-        f"• TXID: <code>{txid[:16]}...{txid[-8:]}</code>\n"
-        f"• {info['name']} → {output_coin}\n"
-        f"• Հաստատումներ: 0/{info['confs']}\n\n"
-        f"⏳ Խնդրում ենք սպասել...\n"
-        f"📱 Դուք կստանաք ծանուցումներ այստեղ:",
+        f"Starting to check your transfer.\n\n"
+        f"Transaction details:\n"
+        f"TXID: <code>{txid[:16]}...{txid[-8:]}</code>\n"
+        f"{info['name']} -> {output_coin}\n"
+        f"Confirmations: 0/{info['confs']}\n\n"
+        f"Please wait...\n"
+        f"You will receive notifications here.",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
-    
+
+    context.user_data.clear()
     return ConversationHandler.END
 
 async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check user's transaction status"""
     user_id = update.effective_user.id
-    
+
     async with aiosqlite.connect("swapbot.db") as conn:
         async with conn.execute(
-            "SELECT txid, coin, status, confs, required_confs, amount, output_coin FROM deposits WHERE user_id = ? ORDER BY inserted_at DESC LIMIT 5",
+            "SELECT txid, coin, status, confs, required_confs, onchain_amount, output_coin FROM deposits WHERE user_id = ? ORDER BY inserted_at DESC LIMIT 5",
             (user_id,)
         ) as cursor:
             rows = await cursor.fetchall()
-    
+
     if not rows:
         await update.message.reply_text(
-            "❌ Դուք դեռ գործարք չունեք։\n"
-            "Սկսելու համար սեղմեք /start"
+            "No transactions found.\n"
+            "Click /start to begin."
         )
-        return
-    
-    message = "📊 Ձեր վերջին գործարքները:\n\n"
-    
+        return ConversationHandler.END
+
+    message = "Your recent transactions:\n\n"
+
     for row in rows:
         status_emoji = {
-            'NEW': '🆕',
-            'CONFIRMING': '⏳',
-            'CONFIRMED': '✅',
-            'WITHDRAWN': '🎉',
-            'TRADE_FAILED': '❌',
-        }.get(row[2], '❓')
-        
-        message += f"{status_emoji} {row[1]} → {row[6] or 'USDT'}\n"
-        message += f"   Status: {row[2]}\n"
+            'NEW': 'NEW',
+            'CONFIRMING': 'CONFIRMING',
+            'CONFIRMED': 'CONFIRMED',
+            'SOLD': 'SOLD',
+            'WITHDRAWN': 'DONE',
+            'TRADE_FAILED': 'FAILED',
+            'PROCESSING_ERROR': 'ERROR',
+        }.get(row[2], row[2])
+
+        message += f"{row[1]} -> {row[6] or 'USDT'}\n"
+        message += f"   Status: {status_emoji}\n"
         message += f"   Confs: {row[3]}/{row[4]}\n"
         if row[5]:
             message += f"   Amount: {row[5]:.4f}\n"
         message += "\n"
-    
+
     await update.message.reply_text(message)
-    return
-    
-    status_emoji = {
-        "NEW": "🆕",
-        "CONFIRMING": "⏳",
-        "CONFIRMED": "✅",
-        "SOLD": "💱",
-        "WITHDRAWN": "🎉",
-        "FAILED": "❌"
-    }
-    
-    status_text = {
-        "NEW": "Նոր",
-        "CONFIRMING": "Հաստատվում է",
-        "CONFIRMED": "Հաստատված",
-        "SOLD": "Վաճառված",
-        "WITHDRAWN": "Ավարտված",
-        "FAILED": "Սխալ"
-    }
-    
-    keyboard = [[KeyboardButton("🔄 /start")]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
-    await update.message.reply_text(
-        f"📊 Գործարքի կարգավիճակ\n\n"
-        f"TXID: <code>{txid[:16]}...{txid[-8:]}</code>\n"
-        f"Մետաղադրամ: {coin}\n"
-        f"Կարգավիճակ: {status_emoji.get(status, '❓')} {status_text.get(status, status)}\n"
-        f"Հաստատումներ: {confs}/{required}\n\n"
-        f"{'✅ Շուտով կավարտվի!' if status in ['CONFIRMED', 'SOLD'] else '⏳ Սպասեք...' if status == 'CONFIRMING' else '🔍 Ստուգվում է...'}",
-        parse_mode="HTML",
-        reply_markup=reply_markup
-    )
-    
-    return CHOOSING_COIN
+    return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
     await update.message.reply_text(
-        "❌ Չեղարկված է։ /start",
+        "Cancelled. /start to begin again.",
         reply_markup=ReplyKeyboardRemove()
     )
     return ConversationHandler.END
 
-
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown commands or messages"""
     await update.message.reply_text(
-        "❌ Սխալ հրաման\n\n"
-        "Եթե չգիտեք ինչպես օգտագործել Conod բոտը,\n"
-        "կարող եք գրել մեր օպերատորին՝\n\n"
-        "📞 @Conodoperatorbot\n\n"
-        "Կամ սեղմեք /start նոր փոխանակման համար։"
+        "Unknown command.\n\n"
+        "Contact support: @Conodoperatorbot\n\n"
+        "Or click /start for new exchange."
     )
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors in the bot."""
+    logger.error(f"Exception while handling update: {context.error}")
+    try:
+        if update and update.effective_message:
+            await update.effective_message.reply_text(
+                "An error occurred. Please try /start again."
+            )
+    except Exception as e:
+        logger.error(f"Error in error handler: {e}")
+
+async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle conversation timeout"""
+    if update and update.effective_message:
+        await update.effective_message.reply_text(
+            "Session timed out. Please /start again."
+        )
+    return ConversationHandler.END
 
 def main():
     application = Application.builder().token(settings.telegram_bot_token).build()
-    
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             CHOOSING_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, coin_chosen)],
             WAITING_TXID: [MessageHandler(filters.TEXT & ~filters.COMMAND, waiting_for_txid)],
             WAITING_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_received)],
+            ConversationHandler.TIMEOUT: [MessageHandler(filters.ALL, timeout_handler)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("start", start),
+        ],
+        conversation_timeout=600,  # 10 minute timeout
+        per_user=True,
+        per_chat=True,
     )
-    
+
     application.add_handler(conv_handler)
 
+    # Handler for check commands
+    application.add_handler(CommandHandler("status", check_transaction))
+    application.add_handler(CommandHandler("check", check_transaction))
+
     # Handler for check button (outside conversation)
-    async def check_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await check_transaction(update, context)
-    
     application.add_handler(MessageHandler(
-        filters.Regex("📊.*Ստուգել") & ~filters.COMMAND,
-        check_button_handler
+        filters.Regex("(?i)check|status") & ~filters.COMMAND,
+        check_transaction
     ))
 
-    
+    # Catch-all for unknown messages (must be last)
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        unknown_command
+    ))
 
-    print("🤖 Bot starting...")
-    print("📍 Supported swaps:")
-    print("   • Bitcoin → USDT")
-    print("   • Litecoin → USDT")
-    print("   • Bitcoin → USDT")
-    print("   • Litecoin → USDT")
-    print("   • Dash → USDT")
-    print("   • Dash → TRON")
-    print("   • USDT → TRON")
-    application.run_polling()
+    # Error handler
+    application.add_error_handler(error_handler)
+
+    print("Bot starting...")
+    print("Supported swaps:")
+    print("   Bitcoin -> USDT")
+    print("   Litecoin -> USDT")
+    print("   Dash -> USDT")
+    print("   Dash -> TRON")
+    print("   Monero -> USDT")
+    application.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
