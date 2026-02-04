@@ -49,7 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Welcome to Conod Bot!\n\n"
         "Minimum: $20 USD\n"
-        "Fee: 3% + $1\n\n"
+        "Fee: 2% + $1\n\n"
         "Select exchange type:",
         reply_markup=reply_markup
     )
@@ -108,7 +108,7 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"You selected: {info['name']} -> {output_coin}\n"
         f"Network: {info['network']}\n"
         f"Confirmations: {info['confs']}\n"
-        f"Fee: 3%\n"
+        f"Fee: 2%\n"
         f"Time: 20-30 minutes\n\n"
         f"After sending, click 'I have sent'.",
         parse_mode="HTML",

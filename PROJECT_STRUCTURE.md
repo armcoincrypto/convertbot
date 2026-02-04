@@ -74,7 +74,7 @@ Background process that:
 Trading execution:
 - Fetches on-chain amount from blockchain/database
 - Sells crypto to USDT on MEXC
-- Calculates fees (3% + $1 network)
+- Calculates fees (2% + $1 network)
 - Handles two-tier withdrawal (XMR immediate, others delayed)
 - Sends user notifications
 
@@ -180,7 +180,7 @@ Logs:
 | Setting | Description | Default |
 |---------|-------------|---------|
 | DRY_RUN | Simulation mode | true |
-| COMMISSION_PERCENT | Fee percentage | 3.0 |
+| COMMISSION_PERCENT | Fee percentage | 2.0 |
 | required_confs_btc | BTC confirmations | 2 |
 | required_confs_ltc | LTC confirmations | 4 |
 | required_confs_dash | DASH confirmations | 4* |

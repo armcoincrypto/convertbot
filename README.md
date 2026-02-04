@@ -83,11 +83,11 @@ NEW -> CONFIRMING -> CONFIRMED -> SOLD -> WITHDRAWN
 
 ## Fee Structure
 
-- **Commission**: 3%
+- **Commission**: 2%
 - **Network fee**: $1 (TRC20 withdrawal)
 - **Minimum deposit**: $20 USD equivalent
 
-Example: $100 deposit -> $97 after commission -> $96 final
+Example: $100 deposit -> $98 after commission -> $97 final
 
 ## Referral System
 
@@ -134,7 +134,7 @@ ADDR_BTC=your_btc_deposit_address
 ADDR_LTC=your_ltc_deposit_address
 ADDR_DASH=your_dash_deposit_address
 ADDR_XMR=your_xmr_deposit_address
-COMMISSION_PERCENT=3
+COMMISSION_PERCENT=2
 DRY_RUN=false
 ```
 
