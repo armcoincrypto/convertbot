@@ -1,7 +1,10 @@
 """
-Armenian (Հայերdelays) UI messages for Convertbot
+Armenian UI messages for Convertbot
 
-All user-facing strings in Armenian.
+IMPORTANT: This file contains placeholder text.
+On VPS, run: bash scripts/install_armenian.sh
+to populate with real Armenian from git history.
+
 Fee is pulled from config for single source of truth.
 """
 from app.config import settings
@@ -10,170 +13,179 @@ from app.config import settings
 class MSG:
     """Armenian UI messages"""
 
-    # Fee display (from config)
     @staticmethod
     def fee_display():
-        return f"{settings.commission_percent:.0f}% + ${settings.fee_fixed_usd}"
+        return f"{settings.commission_percent:.0f}% + ${settings.fee_fixed_usd:.0f}"
 
-    # Button labels
+    # Button labels (symbols/English are OK)
     BTN_BTC_USDT = "Bitcoin -> USDT"
     BTN_LTC_USDT = "Litecoin -> USDT"
     BTN_DASH_USDT = "Dash -> USDT"
     BTN_DASH_TRX = "Dash -> TRON"
     BTN_XMR_USDT = "Monero -> USDT"
-    BTN_CHECK_STATUS = " Delays delays"
-    BTN_I_SENT = "Delays delays"
+    BTN_CHECK_STATUS = "Check Status"
+    BTN_I_SENT = "I sent"
+    BTN_NEW_EXCHANGE = "New exchange /start"
+    BTN_CHECK = "Check"
     BTN_START = "/start"
 
-    # Welcome message
     @staticmethod
     def welcome():
+        fee = MSG.fee_display()
         return (
-            f"Delays delays Conod Bot!\n\n"
-            f"Delays delays: $20 USD\n"
-            f"Delays delays: {MSG.fee_display()}\n\n"
-            f"Delays delays delays delays:"
+            f"Welcome to Conod Bot!\n"
+            f"\nMinimum: $20 USD\n"
+            f"Fee: {fee}\n"
+            f"Select exchange type:"
         )
 
-    # Deposit instructions
     @staticmethod
     def deposit_address(address: str, coin_name: str, output_coin: str, network: str, confs: int):
+        fee = MSG.fee_display()
         return (
-            f"Delays delays delays:\n\n"
+            f"Your deposit address:\n\n"
             f"<code>{address}</code>\n\n"
-            f"Delays delays: {coin_name} -> {output_coin}\n"
-            f"Delays: {network}\n"
-            f"Delays delays: {confs}\n"
-            f"Delays delays: {MSG.fee_display()}\n"
-            f"Delays: 20-30 delays\n\n"
-            f"Delays delays delays 'Delays delays' delays."
+            f"You selected: {coin_name} -> {output_coin}\n"
+            f"Network: {network}\n"
+            f"Confirmations: {confs}\n"
+            f"Fee: {fee}\n"
+            f"Time: 20-30 minutes\n\n"
+            f"After sending, click 'I sent'."
         )
 
-    # TXID request
     TXID_REQUEST = (
-        "Delays delays delays HASH (64 delays):\n\n"
-        "Delays delays:\n"
+        "Received!\n\n"
+        "Please send transaction HASH (64 chars):\n\n"
+        "Example:\n"
         "<code>a65b33369cf0bcd1b4e7a47f00e6536612210aeb0ddb4e6ac557c9f83d316545</code>"
     )
 
-    # TXID received
     @staticmethod
     def txid_received(txid: str, output_coin: str, network: str):
         return (
-            f"TXID delays!\n\n"
+            f"TXID received!\n\n"
             f"<code>{txid[:32]}\n{txid[32:]}</code>\n\n"
-            f"Delays delays delays {output_coin} ({network}) delays delays:\n\n"
-            f"Delays delays:\n"
+            f"Now send your {output_coin} ({network}) address:\n\n"
+            f"Example:\n"
             f"<code>TVQXrLPpULB6y4KnJMyZorxWQqR7UhhL3g</code>"
         )
 
-    # Address saved
     @staticmethod
     def address_saved(address: str, txid: str, coin_name: str, output_coin: str, confs: int):
         return (
-            f"Delays delays {output_coin} delays:\n"
+            f"Saved {output_coin} address:\n"
             f"<code>{address}</code>\n\n"
-            f"Delays delays delays delays delays.\n\n"
-            f"Delays delays delays:\n"
-            f"TXID: <code>{txid[:16]}...{txid[-8:]}</code>\n"
-            f"{coin_name} -> {output_coin}\n"
-            f"Delays delays: 0/{confs}\n\n"
-            f"Delays delays delays...\n"
-            f"Delays delays delays delays delays delays."
+            f"Checking your transfer...\n\n"
+            f"Transaction details:\n"
+            f"* TXID: <code>{txid[:16]}...{txid[-8:]}</code>\n"
+            f"* {coin_name} -> {output_coin}\n"
+            f"* Confirmations: 0/{confs}\n\n"
+            f"Please wait...\n"
+            f"You will receive notifications here."
         )
 
-    # Status messages
-    STATUS_NEW = "Delays"
-    STATUS_CONFIRMING = "Delays delays"
-    STATUS_CONFIRMED = "Delays delays"
-    STATUS_SOLD = "Delays delays"
-    STATUS_WITHDRAWN = "Delays delays"
-    STATUS_FAILED = "Delays"
-    STATUS_ERROR = "Delays"
+    STATUS_NEW = "New"
+    STATUS_CONFIRMING = "Confirming"
+    STATUS_CONFIRMED = "Confirmed"
+    STATUS_SOLD = "Sold"
+    STATUS_WITHDRAWN = "Done"
+    STATUS_FAILED = "Failed"
+    STATUS_ERROR = "Error"
 
-    # Transaction history
+    STATUS_EMOJI = {
+        "NEW": "NEW",
+        "CONFIRMING": "WAIT",
+        "CONFIRMED": "OK",
+        "SOLD": "SOLD",
+        "WITHDRAWN": "DONE",
+        "TRADE_FAILED": "FAIL",
+        "PROCESSING_ERROR": "ERR"
+    }
+
     NO_TRANSACTIONS = (
-        "Delays delays delays delays.\n"
-        "Delays delays /start delays delays."
+        "No transactions found.\n"
+        "Click /start to begin."
     )
 
     @staticmethod
     def transaction_history_header():
-        return "Delays delays delays:\n\n"
+        return "Your transactions:\n\n"
 
     @staticmethod
     def transaction_item(coin: str, output_coin: str, status: str, confs: int, required: int, amount: float = None):
-        text = f"{coin} -> {output_coin}\n"
-        text += f"   Delays: {status}\n"
-        text += f"   Delays: {confs}/{required}\n"
+        emoji = MSG.STATUS_EMOJI.get(status, "?")
+        text = f"* {coin} -> {output_coin}\n"
+        text += f"   Status: {emoji} {status}\n"
+        text += f"   Confs: {confs}/{required}\n"
         if amount:
-            text += f"   Delays: {amount:.4f}\n"
+            text += f"   Amount: {amount:.4f}\n"
         return text + "\n"
 
-    # Errors
-    INVALID_COIN = "Delays delays delays delays delays delays /start delays delays."
+    INVALID_COIN = "Please select from buttons above."
 
     TXID_ALREADY_USED = (
-        "Delays delays delays delays.\n\n"
-        "Delays delays delays HASH."
+        "This transaction already used.\n\n"
+        "Please send NEW transaction HASH:\n\n"
+        "Example:\n"
+        "<code>6559ce2924b306bde3ca6433b92e9bac94821f587fda74ada758fd8477cf4f16</code>"
     )
-    TXID_ALREADY_USED_BY_YOU = "Delays delays delays delays delays delays."
-    TXID_ALREADY_USED_BY_OTHER = "Delays delays delays delays delays delays."
+
+    TXID_ALREADY_USED_BY_YOU = "This transaction already used by you.\nPlease send NEW transaction."
+    TXID_ALREADY_USED_BY_OTHER = "This transaction used by another user."
 
     INVALID_TXID = (
-        "Delays delays.\n\n"
-        "TXID delays delays 64 delays (0-9, a-f)."
+        "Invalid format.\n\n"
+        "TXID must be 64 chars (0-9, a-f)."
     )
 
     INVALID_ADDRESS = (
-        "Delays delays delays.\n\n"
-        "TRC20 delays delays T-delays delays delays 34 delays."
+        "Invalid address.\n\n"
+        "TRC20 address must start with T and be 34 chars."
     )
 
-    SESSION_EXPIRED = "Delays delays. Delays /start delays."
-
-    # Bot messages
-    BOT_ERROR = "Delays delays. Delays /start delays."
-    SESSION_TIMEOUT = "Delays delays. Delays /start delays."
-    CANCELLED = "Delays delays. /start delays delays."
+    SESSION_EXPIRED = "Session expired. Click /start"
+    BOT_ERROR = "Error occurred. Click /start"
+    SESSION_TIMEOUT = "Session timed out. Click /start"
+    CANCELLED = "Cancelled. /start"
 
     UNKNOWN_COMMAND = (
-        "Delays delays.\n\n"
-        "Delays delays: @Conodoperatorbot\n\n"
-        "Delays delays /start delays."
+        "Unknown command.\n\n"
+        "If you need help with Conod bot,\n"
+        "contact our operator:\n\n"
+        "@Conodoperatorbot\n\n"
+        "Or click /start for new exchange."
     )
 
-    # Worker notifications
-    DEPOSIT_CONFIRMED = "Delays delays!"
+    DEPOSIT_CONFIRMED = "Deposit confirmed!"
+
     FAKE_TRANSACTION = (
-        "Delays delays delays\n\n"
-        "Delays delays delays delays delays blockchain-delays.\n"
-        "Delays delays delays txid-delays."
+        "Invalid transaction.\n\n"
+        "This transaction not found on blockchain.\n"
+        "Please check the txid."
     )
 
-    # Small amount notification
     @staticmethod
     def amount_too_small(error_msg: str, txid: str):
         fee = MSG.fee_display()
         return (
-            f"Delays delays delays delays\n\n"
+            f"Amount not sufficient.\n\n"
             f"{error_msg}\n\n"
-            f"Delays delays $20 delays, delays delays\n"
-            f"   delays delays {fee} delays delays.\n"
-            f"   Delays delays ~$18 USDT\n\n"
-            f"Delays delays delays delays:\n"
+            f"Minimum $20 required, so that\n"
+            f"   after {fee} fee\n"
+            f"   you receive ~$18 USDT\n\n"
+            f"Contact operator:\n"
             f"@Conodoperatorbot\n\n"
-            f"Delays delays delays delays delays.\n\n"
+            f"We will process manually.\n\n"
             f"TXID: {txid[:16]}..."
         )
 
     @staticmethod
     def operator_small_amount(user_id: int, usd_val: float, amount: float, coin: str, address: str, txid: str):
         return (
-            f"Delays: Delays delays\n\n"
-            f"Delays: {user_id}\n"
-            f"Delays: ${usd_val:.2f} ({amount} {coin})\n"
-            f"Delays: {address}\n"
+            f"ATTENTION: Small amount\n\n"
+            f"User: {user_id}\n"
+            f"Amount: ${usd_val:.2f} ({amount} {coin})\n"
+            f"Address: {address}\n"
             f"TXID: {txid[:32]}...\n\n"
-            f"Delays delays delays @Conodoperatorbot delays."
+            f"User will contact @Conodoperatorbot."
         )
