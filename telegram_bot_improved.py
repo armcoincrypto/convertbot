@@ -1,13 +1,13 @@
-"""Telegram Bot with i18n support and centralized fee config."""
+"""Telegram Bot with i18n support and language detection."""
 import asyncio
 import logging
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from app.db import txid_exists, get_txid_owner
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from app.config import settings
+from app.config import settings, fee_display
 from libs.explorer_client import explorer_client
 from app.models import CoinType
-from app.i18n import MSG  # Armenian messages by default
+from app.i18n import get_msg, resolve_lang
 import aiosqlite
 import re
 
@@ -36,9 +36,17 @@ COIN_INFO = {
     "XMR": {"name": "Monero", "network": "Monero", "confs": 10, "to": "USDT"},
 }
 
+
+def get_user_msg(update):
+    """Get MSG class for user's language."""
+    lang = resolve_lang(update)
+    return get_msg(lang)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Clear any previous conversation data
+    """Start command - show coin selection."""
     context.user_data.clear()
+    MSG = get_user_msg(update)
 
     keyboard = [
         [KeyboardButton(MSG.BTN_BTC_USDT), KeyboardButton(MSG.BTN_LTC_USDT)],
@@ -53,11 +61,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return CHOOSING_COIN
 
-async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
 
-    # Check if user clicked "Check Status"
-    if "Check" in text or "Status" in text or MSG.BTN_CHECK_STATUS in text:
+async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle coin selection."""
+    text = update.message.text
+    MSG = get_user_msg(update)
+
+    # Check if user clicked "Check Status" (any language)
+    if any(x in text.lower() for x in ["check", "status", "prover", "stugel"]):
         await check_transaction(update, context)
         return ConversationHandler.END
 
@@ -107,10 +118,14 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return WAITING_TXID
 
-async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
 
-    if MSG.BTN_I_SENT in text or "sent" in text.lower():
+async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle TXID input."""
+    text = update.message.text
+    MSG = get_user_msg(update)
+
+    # Check for "I sent" button in any language
+    if any(x in text.lower() for x in ["sent", "otpravil", "ugharkel"]):
         await update.message.reply_text(
             MSG.TXID_REQUEST,
             parse_mode="HTML",
@@ -149,9 +164,12 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return WAITING_TXID
 
+
 async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle address input."""
     address = update.message.text.strip()
     user_id = update.message.from_user.id
+    MSG = get_user_msg(update)
 
     if not (address.startswith("T") and len(address) == 34):
         await update.message.reply_text(
@@ -210,9 +228,11 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
+
 async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check user's transaction status"""
+    """Check user's transaction status."""
     user_id = update.effective_user.id
+    MSG = get_user_msg(update)
 
     async with aiosqlite.connect("swapbot.db") as conn:
         async with conn.execute(
@@ -252,7 +272,10 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message)
     return ConversationHandler.END
 
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel conversation."""
+    MSG = get_user_msg(update)
     context.user_data.clear()
     await update.message.reply_text(
         MSG.CANCELLED,
@@ -260,24 +283,31 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle unknown commands or messages"""
+    """Handle unknown commands or messages."""
+    MSG = get_user_msg(update)
     await update.message.reply_text(MSG.UNKNOWN_COMMAND)
+
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors in the bot."""
     logger.error(f"Exception while handling update: {context.error}")
     try:
         if update and update.effective_message:
+            MSG = get_user_msg(update)
             await update.effective_message.reply_text(MSG.BOT_ERROR)
     except Exception as e:
         logger.error(f"Error in error handler: {e}")
 
+
 async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle conversation timeout"""
+    """Handle conversation timeout."""
     if update and update.effective_message:
+        MSG = get_user_msg(update)
         await update.effective_message.reply_text(MSG.SESSION_TIMEOUT)
     return ConversationHandler.END
+
 
 def main():
     application = Application.builder().token(settings.telegram_bot_token).build()
@@ -307,7 +337,7 @@ def main():
 
     # Handler for check button (outside conversation)
     application.add_handler(MessageHandler(
-        filters.Regex("(?i)check|status") & ~filters.COMMAND,
+        filters.Regex("(?i)check|status|prover|stugel") & ~filters.COMMAND,
         check_transaction
     ))
 
@@ -327,7 +357,8 @@ def main():
     print("   Dash -> USDT")
     print("   Dash -> TRON")
     print("   Monero -> USDT")
-    print(f"Fee: {MSG.fee_display()}")
+    print(f"Fee: {fee_display()}")
+    print("Languages: Armenian (hy), English (en), Russian (ru)")
     application.run_polling(drop_pending_updates=True)
 
 

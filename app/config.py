@@ -26,3 +26,13 @@ def get_settings():
     return Settings()
 
 settings = get_settings()
+
+
+def fee_display() -> str:
+    """Return fee as display string: '2% + $1'"""
+    return f"{settings.commission_percent:.0f}% + ${settings.fee_fixed_usd:.0f}"
+
+
+def fee_percent_display() -> str:
+    """Return just the percent part: '2%'"""
+    return f"{settings.commission_percent:.0f}%"
