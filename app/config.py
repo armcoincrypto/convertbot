@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     required_confs_dash: int = 4
     dry_run: bool = True
     commission_percent: float = 2.0  # 2% commission (change this to update fee)
+    fee_fixed_usd: float = 1.0  # Fixed $1 fee component (change this to update)
     log_level: str = "INFO"
     
 @lru_cache()

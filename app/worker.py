@@ -10,6 +10,7 @@ from libs.explorer_client import explorer_client
 from app.validation import validate_amount
 from libs.mexc_client import MEXCClient
 from libs.telegram_client import TelegramClient
+from app.i18n import MSG
 
 logger = setup_logger(__name__)
 
@@ -158,7 +159,7 @@ async def worker_cycle() -> Dict[str, Any]:
                         await db.update_deposit_status(deposit.txid, DepositStatus.PROCESSING_ERROR)
                         await telegram.send_message(
                             deposit.user_id,
-                            "❌ Սխալ գործարք\n\nԱյս գործարքը չի գտնվել blockchain-ում։\nԽնդրում ենք ստուգել txid-ը։"
+                            MSG.FAKE_TRANSACTION
                         )
                         continue
                     
@@ -264,32 +265,18 @@ async def worker_cycle() -> Dict[str, Any]:
                         # Notify user
                         try:
                             telegram_client = TelegramClient(settings.telegram_bot_token, settings.admin_chat_id)
-                            msg = (
-                                f"⚠️ Գումարը բավարար չէ\n\n"
-                                f"{error_msg}\n\n"
-                                f"💡 Նվազագույն $20 է պետք, որպեսզի\n"
-                                f"   հետո հանենք 3% + $1 միջնորդավճար։\n"
-                                f"   Դուք կստանաք ~$18 USDT\n\n"
-                                f"📱 Կապվեք օպերատորի հետ:\n"
-                                f"@Conodoperatorbot\n\n"
-                                f"Մենք կկատարենք փոխանակումը ձեռքով։\n\n"
-                                f"TXID: {deposit.txid[:16]}..."
-                            )
+                            msg = MSG.amount_too_small(error_msg, deposit.txid)
                             await telegram_client.send_message(deposit.user_id, msg)
                             logger.info(f"✅ Sent 'contact operator' notification to user {deposit.user_id}")
-                            
+
                             # Notify operator
                             try:
                                 from libs.mexc_client import MEXCClient
                                 price = MEXCClient(settings.mexc_api_key, settings.mexc_api_secret).get_ticker_price(f"{deposit.coin.value if hasattr(deposit.coin, 'value') else deposit.coin}USDT")
                                 usd_val = onchain_amount * price if price else 0
-                                operator_msg = (
-                                    f"🔔 ՈՒՇԱԴՐՈՒԹՅՈՒՆ: Փոքր գումար\n\n"
-                                    f"👤 User: {deposit.user_id}\n"
-                                    f"💰 Գումար: ${usd_val:.2f} ({onchain_amount} {deposit.coin.value if hasattr(deposit.coin, 'value') else deposit.coin})\n"
-                                    f"📍 Հասցե: {deposit.target_address}\n"
-                                    f"🔗 TXID: {deposit.txid[:32]}...\n\n"
-                                    f"Օգտատերը կապվելու է @Conodoperatorbot հետ։"
+                                coin_str = deposit.coin.value if hasattr(deposit.coin, 'value') else deposit.coin
+                                operator_msg = MSG.operator_small_amount(
+                                    deposit.user_id, usd_val, onchain_amount, coin_str, deposit.target_address, deposit.txid
                                 )
                                 await telegram_client.send_message(settings.admin_chat_id, operator_msg)
                                 logger.info(f"✅ Notified operator about small amount")

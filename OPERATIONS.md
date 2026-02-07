@@ -356,6 +356,55 @@ cp /root/Convertbot/swapbot.db /root/Convertbot/backups/swapbot_$(date +%Y%m%d_%
 sqlite3 swapbot.db ".mode csv" ".output deposits_backup.csv" "SELECT * FROM deposits;"
 ```
 
+## i18n Verification
+
+### Check for Hardcoded English Text
+
+After deployment, verify no English UI text leaked into the bot:
+
+```bash
+# Should return NO matches (except coin names Bitcoin/Litecoin/Dash/Monero allowed)
+grep -nE '"[^"]*Welcome[^"]*"' telegram_bot_improved.py
+grep -nE '"[^"]*Invalid format[^"]*"' telegram_bot_improved.py
+```
+
+### Verify Fee Configuration
+
+```bash
+# Check fee is set correctly in config
+grep -E "commission_percent|fee_fixed_usd" app/config.py
+
+# Verify no hardcoded 3% exists
+grep -rn "3%" --include="*.py" --exclude-dir=venv
+grep -rn "0.03" --include="*.py" --exclude-dir=venv
+```
+
+### Test i18n Import
+
+```bash
+python3 -c "from app.i18n import MSG; print('Fee:', MSG.fee_display())"
+```
+
+### Compile Check (Pre-Deploy)
+
+```bash
+python3 -m py_compile telegram_bot_improved.py
+python3 -m py_compile app/worker.py
+python3 -m py_compile app/i18n/hy.py
+echo "All files compile OK"
+```
+
+### Change Fee
+
+To change the fee, edit **only** `app/config.py`:
+
+```python
+commission_percent: float = 2.0  # Change this (e.g., 3.0 for 3%)
+fee_fixed_usd: float = 1.0       # Change this (e.g., 2.0 for $2)
+```
+
+All UI text will automatically update via `MSG.fee_display()`.
+
 ## Security Reminders
 
 1. Never share `.env` file contents

@@ -1,4 +1,4 @@
-"""Telegram Bot with Dash to TRON support."""
+"""Telegram Bot with i18n support and centralized fee config."""
 import asyncio
 import logging
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -7,6 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from app.config import settings
 from libs.explorer_client import explorer_client
 from app.models import CoinType
+from app.i18n import MSG  # Armenian messages by default
 import aiosqlite
 import re
 
@@ -40,17 +41,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
 
     keyboard = [
-        [KeyboardButton("Bitcoin -> USDT"), KeyboardButton("Litecoin -> USDT")],
-        [KeyboardButton("Dash -> USDT"), KeyboardButton("Dash -> TRON")],
-        [KeyboardButton("Monero -> USDT")],
-        [KeyboardButton("Check Status")],
+        [KeyboardButton(MSG.BTN_BTC_USDT), KeyboardButton(MSG.BTN_LTC_USDT)],
+        [KeyboardButton(MSG.BTN_DASH_USDT), KeyboardButton(MSG.BTN_DASH_TRX)],
+        [KeyboardButton(MSG.BTN_XMR_USDT)],
+        [KeyboardButton(MSG.BTN_CHECK_STATUS)],
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "Welcome to Conod Bot!\n\n"
-        "Minimum: $20 USD\n"
-        "Fee: 2% + $1\n\n"
-        "Select exchange type:",
+        MSG.welcome(),
         reply_markup=reply_markup
     )
     return CHOOSING_COIN
@@ -59,7 +57,7 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     # Check if user clicked "Check Status"
-    if "Check" in text or "Status" in text:
+    if "Check" in text or "Status" in text or MSG.BTN_CHECK_STATUS in text:
         await check_transaction(update, context)
         return ConversationHandler.END
 
@@ -89,7 +87,7 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         coin_key = "XMR"
 
     if not coin:
-        await update.message.reply_text("Please select from the buttons above or /start to restart.")
+        await update.message.reply_text(MSG.INVALID_COIN)
         return CHOOSING_COIN
 
     context.user_data["coin"] = coin
@@ -99,18 +97,11 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info = COIN_INFO[coin_key]
     address = DEPOSIT_ADDRESSES[coin]
 
-    keyboard = [[KeyboardButton("I have sent")]]
+    keyboard = [[KeyboardButton(MSG.BTN_I_SENT)]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
     await update.message.reply_text(
-        f"Your deposit address:\n\n"
-        f"<code>{address}</code>\n\n"
-        f"You selected: {info['name']} -> {output_coin}\n"
-        f"Network: {info['network']}\n"
-        f"Confirmations: {info['confs']}\n"
-        f"Fee: 2%\n"
-        f"Time: 20-30 minutes\n\n"
-        f"After sending, click 'I have sent'.",
+        MSG.deposit_address(address, info['name'], output_coin, info['network'], info['confs']),
         parse_mode="HTML",
         reply_markup=reply_markup
     )
@@ -119,11 +110,9 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
-    if "I have sent" in text or "sent" in text.lower():
+    if MSG.BTN_I_SENT in text or "sent" in text.lower():
         await update.message.reply_text(
-            "Please send the transaction HASH (64 characters):\n\n"
-            "Example:\n"
-            "<code>a65b33369cf0bcd1b4e7a47f00e6536612210aeb0ddb4e6ac557c9f83d316545</code>",
+            MSG.TXID_REQUEST,
             parse_mode="HTML",
             reply_markup=ReplyKeyboardRemove()
         )
@@ -138,8 +127,7 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if existing:
             await update.message.reply_text(
-                "This transaction has already been used.\n\n"
-                "Please send a NEW transaction HASH.",
+                MSG.TXID_ALREADY_USED,
                 parse_mode="HTML"
             )
             return WAITING_TXID
@@ -150,18 +138,13 @@ async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         network = "TRC20" if output_coin in ["USDT", "TRX"] else "Tron"
 
         await update.message.reply_text(
-            f"TXID received!\n\n"
-            f"<code>{clean_text[:32]}\n{clean_text[32:]}</code>\n\n"
-            f"Now please send your {output_coin} ({network}) receiving address:\n\n"
-            f"Example:\n"
-            f"<code>TVQXrLPpULB6y4KnJMyZorxWQqR7UhhL3g</code>",
+            MSG.txid_received(clean_text, output_coin, network),
             parse_mode="HTML"
         )
         return WAITING_ADDRESS
     else:
         await update.message.reply_text(
-            "Invalid format.\n\n"
-            "TXID must be 64 characters (0-9, a-f).",
+            MSG.INVALID_TXID,
             parse_mode="HTML"
         )
         return WAITING_TXID
@@ -172,8 +155,7 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not (address.startswith("T") and len(address) == 34):
         await update.message.reply_text(
-            "Invalid address.\n\n"
-            "TRC20 address must start with T and be 34 characters.",
+            MSG.INVALID_ADDRESS,
             parse_mode="HTML"
         )
         return WAITING_ADDRESS
@@ -182,7 +164,7 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txid = context.user_data.get("txid")
 
     if not coin or not txid:
-        await update.message.reply_text("Session expired. Please /start again.")
+        await update.message.reply_text(MSG.SESSION_EXPIRED)
         context.user_data.clear()
         return ConversationHandler.END
 
@@ -190,9 +172,9 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await txid_exists(txid):
         owner_id = await get_txid_owner(txid)
         if owner_id == user_id:
-            await update.message.reply_text("This transaction has already been used by you.")
+            await update.message.reply_text(MSG.TXID_ALREADY_USED_BY_YOU)
         else:
-            await update.message.reply_text("This transaction has already been used by another user.")
+            await update.message.reply_text(MSG.TXID_ALREADY_USED_BY_OTHER)
         context.user_data.clear()
         return ConversationHandler.END
 
@@ -216,19 +198,11 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await conn.commit()
 
-    keyboard = [[KeyboardButton("/start"), KeyboardButton("Check Status")]]
+    keyboard = [[KeyboardButton(MSG.BTN_START), KeyboardButton(MSG.BTN_CHECK_STATUS)]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await update.message.reply_text(
-        f"Saved {output_coin} address:\n"
-        f"<code>{address}</code>\n\n"
-        f"Starting to check your transfer.\n\n"
-        f"Transaction details:\n"
-        f"TXID: <code>{txid[:16]}...{txid[-8:]}</code>\n"
-        f"{info['name']} -> {output_coin}\n"
-        f"Confirmations: 0/{info['confs']}\n\n"
-        f"Please wait...\n"
-        f"You will receive notifications here.",
+        MSG.address_saved(address, txid, info['name'], output_coin, info['confs']),
         parse_mode="HTML",
         reply_markup=reply_markup
     )
@@ -248,31 +222,32 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rows = await cursor.fetchall()
 
     if not rows:
-        await update.message.reply_text(
-            "No transactions found.\n"
-            "Click /start to begin."
-        )
+        await update.message.reply_text(MSG.NO_TRANSACTIONS)
         return ConversationHandler.END
 
-    message = "Your recent transactions:\n\n"
+    # Status mapping
+    status_map = {
+        'NEW': MSG.STATUS_NEW,
+        'CONFIRMING': MSG.STATUS_CONFIRMING,
+        'CONFIRMED': MSG.STATUS_CONFIRMED,
+        'SOLD': MSG.STATUS_SOLD,
+        'WITHDRAWN': MSG.STATUS_WITHDRAWN,
+        'TRADE_FAILED': MSG.STATUS_FAILED,
+        'PROCESSING_ERROR': MSG.STATUS_ERROR,
+    }
+
+    message = MSG.transaction_history_header()
 
     for row in rows:
-        status_emoji = {
-            'NEW': 'NEW',
-            'CONFIRMING': 'CONFIRMING',
-            'CONFIRMED': 'CONFIRMED',
-            'SOLD': 'SOLD',
-            'WITHDRAWN': 'DONE',
-            'TRADE_FAILED': 'FAILED',
-            'PROCESSING_ERROR': 'ERROR',
-        }.get(row[2], row[2])
-
-        message += f"{row[1]} -> {row[6] or 'USDT'}\n"
-        message += f"   Status: {status_emoji}\n"
-        message += f"   Confs: {row[3]}/{row[4]}\n"
-        if row[5]:
-            message += f"   Amount: {row[5]:.4f}\n"
-        message += "\n"
+        status_text = status_map.get(row[2], row[2])
+        message += MSG.transaction_item(
+            row[1],
+            row[6] or 'USDT',
+            status_text,
+            row[3],
+            row[4],
+            row[5]
+        )
 
     await update.message.reply_text(message)
     return ConversationHandler.END
@@ -280,36 +255,28 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
-        "Cancelled. /start to begin again.",
+        MSG.CANCELLED,
         reply_markup=ReplyKeyboardRemove()
     )
     return ConversationHandler.END
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown commands or messages"""
-    await update.message.reply_text(
-        "Unknown command.\n\n"
-        "Contact support: @Conodoperatorbot\n\n"
-        "Or click /start for new exchange."
-    )
+    await update.message.reply_text(MSG.UNKNOWN_COMMAND)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors in the bot."""
     logger.error(f"Exception while handling update: {context.error}")
     try:
         if update and update.effective_message:
-            await update.effective_message.reply_text(
-                "An error occurred. Please try /start again."
-            )
+            await update.effective_message.reply_text(MSG.BOT_ERROR)
     except Exception as e:
         logger.error(f"Error in error handler: {e}")
 
 async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle conversation timeout"""
     if update and update.effective_message:
-        await update.effective_message.reply_text(
-            "Session timed out. Please /start again."
-        )
+        await update.effective_message.reply_text(MSG.SESSION_TIMEOUT)
     return ConversationHandler.END
 
 def main():
@@ -360,6 +327,7 @@ def main():
     print("   Dash -> USDT")
     print("   Dash -> TRON")
     print("   Monero -> USDT")
+    print(f"Fee: {MSG.fee_display()}")
     application.run_polling(drop_pending_updates=True)
 
 
