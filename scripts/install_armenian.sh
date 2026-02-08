@@ -1,152 +1,162 @@
 #!/bin/bash
 #
-# Install proper Armenian i18n file from git history
+# Install Armenian i18n by extracting ALL strings from git history
 # Run on VPS: bash scripts/install_armenian.sh
 #
-
 set -e
-
 cd "$(dirname "$0")/.."
-PROJECT_ROOT=$(pwd)
 
 echo "=============================================="
-echo "Installing Armenian i18n from git history"
+echo "Extracting Armenian i18n from git history"
 echo "=============================================="
 
-# Extract original Armenian bot
-echo "Extracting original Armenian bot from commit d693785..."
-git show d693785:telegram_bot_improved.py > /tmp/armenian_original.py
+# Extract original file
+git show d693785:telegram_bot_improved.py > /tmp/orig.py
+echo "Extracted original ($(wc -c < /tmp/orig.py) bytes)"
 
-# Check if extraction worked
-if [ ! -s /tmp/armenian_original.py ]; then
-    echo "Error: Could not extract original file from git history"
-    exit 1
-fi
-
-echo "Creating Armenian i18n file..."
-
-# Use Python to parse and generate the file
-python3 - << 'PYTHON_SCRIPT'
+# Generate hy.py using Python - all Armenian comes from /tmp/orig.py
+python3 << 'PYSCRIPT'
 import re
-import sys
 
-# Read original file
-with open('/tmp/armenian_original.py', 'r', encoding='utf-8') as f:
-    original = f.read()
+with open('/tmp/orig.py', 'r', encoding='utf-8') as f:
+    src = f.read()
 
-print(f"Read {len(original)} chars from original")
+# Extract all KeyboardButton texts
+btns = {}
+for line in src.split('\n'):
+    m = re.search(r'KeyboardButton\("([^"]+)"\)', line)
+    if m:
+        t = m.group(1)
+        if 'Bitcoin' in t: btns['btc'] = t
+        elif 'Litecoin' in t: btns['ltc'] = t
+        elif 'Dash' in t and 'TRON' in t: btns['dash_trx'] = t
+        elif 'Dash' in t: btns['dash_usdt'] = t
+        elif 'Monero' in t: btns['xmr'] = t
+        elif any('\u0530' <= c <= '\u058F' for c in t):
+            if '\u054d\u057f\u0578\u0582\u0563' in t: btns['check'] = t
+            elif '\u0565\u0574' in t: btns['sent'] = t
 
-# Extract KeyboardButton texts
-buttons = {}
-for line in original.split('\n'):
-    if 'KeyboardButton' in line:
-        m = re.search(r'KeyboardButton\("([^"]+)"\)', line)
-        if m:
-            text = m.group(1)
-            # Check for Armenian characters (Unicode range 0530-058F)
-            has_armenian = any('\u0530' <= c <= '\u058F' for c in text)
-            
-            if 'Bitcoin' in text:
-                buttons['btc'] = text
-            elif 'Litecoin' in text:
-                buttons['ltc'] = text
-            elif 'Dash' in text and 'TRON' in text:
-                buttons['dash_trx'] = text
-            elif 'Dash' in text:
-                buttons['dash_usdt'] = text
-            elif 'Monero' in text:
-                buttons['xmr'] = text
-            elif has_armenian:
-                if '\u054d\u057f\u0578\u0582\u0563' in text:  # Armenian for "check"
-                    buttons['check'] = text
-                elif '✅' in text:
-                    buttons['sent'] = text
+# Extract messages by finding reply_text patterns
+msgs = {}
 
-print("Buttons found:")
-for k, v in buttons.items():
-    print(f"  {k}: {v}")
+# Welcome - find the first big Armenian message
+m = re.search(r'reply_text\(\s*"([^\n]+\\n[^\n]+\\n[^\n]+\\n[^\n]+\\n[^"]+)"', src)
+if m: msgs['welcome'] = m.group(1)
 
-# Write hy.py
-output = '''"""
-Armenian UI messages for Convertbot
-Auto-generated from original bot (commit d693785)
-"""
+# TXID request - contains HASH
+m = re.search(r'"([^"]*HASH[^"]+64[^"]+)"', src)
+if m: msgs['txid_req'] = m.group(1)
+
+# TXID received - contains TXID + address request
+m = re.search(r'"(TXID[^"]+\{output_coin\}[^"]+)"', src)
+if m: msgs['txid_recv'] = m.group(1)
+
+# Invalid coin
+m = re.search(r'"([^"]+\u0568\u0576\u057f\u0580\u0565\u056c[^"]+)"', src)  # delays
+if m: msgs['invalid_coin'] = m.group(1)
+
+# Already used
+m = re.search(r'"(\u274c[^"]+\u0576\u0578\u0580[^"]+)"', src, re.IGNORECASE)
+if m: msgs['already_used'] = m.group(1)
+
+# Invalid TXID
+m = re.search(r'"(\u274c[^"]+64[^"]+a-f[^"]+)"', src)
+if m: msgs['invalid_txid'] = m.group(1)
+
+# Invalid address
+m = re.search(r'"(\u274c[^"]+TRC20[^"]+)"', src)
+if m: msgs['invalid_addr'] = m.group(1)
+
+print("Buttons:", list(btns.keys()))
+print("Messages:", list(msgs.keys()))
+
+# Build output file
+out = '''# -*- coding: utf-8 -*-
+"""Armenian UI messages for Convertbot - extracted from commit d693785"""
 from app.config import fee_display
 
 
 class MSG:
     """Armenian UI messages"""
 
-    # Button labels
 '''
 
-output += f'    BTN_BTC_USDT = "{buttons.get("btc", "Bitcoin -> USDT")}"\n'
-output += f'    BTN_LTC_USDT = "{buttons.get("ltc", "Litecoin -> USDT")}"\n'
-output += f'    BTN_DASH_USDT = "{buttons.get("dash_usdt", "Dash -> USDT")}"\n'
-output += f'    BTN_DASH_TRX = "{buttons.get("dash_trx", "Dash -> TRON")}"\n'
-output += f'    BTN_XMR_USDT = "{buttons.get("xmr", "Monero -> USDT")}"\n'
-output += f'    BTN_CHECK_STATUS = "{buttons.get("check", "Check Status")}"\n'
-output += f'    BTN_I_SENT = "{buttons.get("sent", "I sent")}"\n'
+# Buttons
+out += f'    BTN_BTC_USDT = "{btns.get("btc", "Bitcoin -> USDT")}"\n'
+out += f'    BTN_LTC_USDT = "{btns.get("ltc", "Litecoin -> USDT")}"\n'
+out += f'    BTN_DASH_USDT = "{btns.get("dash_usdt", "Dash -> USDT")}"\n'
+out += f'    BTN_DASH_TRX = "{btns.get("dash_trx", "Dash -> TRON")}"\n'
+out += f'    BTN_XMR_USDT = "{btns.get("xmr", "Monero -> USDT")}"\n'
+out += f'    BTN_CHECK_STATUS = "{btns.get("check", "Check")}"\n'
+out += f'    BTN_I_SENT = "{btns.get("sent", "I sent")}"\n'
+out += '    BTN_NEW_EXCHANGE = "/start"\n'
+out += '    BTN_CHECK = "Check"\n'
+out += '    BTN_START = "/start"\n\n'
 
-# Rest of the template (messages that need Armenian)
-output += '''    BTN_NEW_EXCHANGE = "New /start"
-    BTN_CHECK = "Check"
-    BTN_START = "/start"
-
-    @staticmethod
+# Welcome - need to process and add fee_display()
+if 'welcome' in msgs:
+    w = msgs['welcome'].replace('3% + $1', '{fee_display()}').replace('\\n', '\\\\n')
+    out += f'''    @staticmethod
     def welcome():
-        return (
-            f"Welcome!\\n"
-            f"\\nMinimum: $20 USD\\n"
-            f"Fee: {fee_display()}\\n"
-            f"Select type:"
-        )
+        return f"{w}"
 
-    @staticmethod
+'''
+else:
+    out += '''    @staticmethod
+    def welcome():
+        return f"Welcome!\\nMinimum: $20 USD\\nFee: {fee_display()}\\nSelect:"
+
+'''
+
+# Deposit address - keep as template
+out += '''    @staticmethod
     def deposit_address(address: str, coin_name: str, output_coin: str, network: str, confs: int):
         return (
-            f"Your address:\\n\\n"
+            f"Address:\\n\\n"
             f"<code>{address}</code>\\n\\n"
-            f"Selected: {coin_name} -> {output_coin}\\n"
+            f"{coin_name} -> {output_coin}\\n"
             f"Network: {network}\\n"
             f"Confirmations: {confs}\\n"
             f"Fee: {fee_display()}\\n"
-            f"Time: 20-30 min\\n\\n"
-            f"After sending click I sent."
+            f"Time: 20-30 min"
         )
 
-    TXID_REQUEST = (
-        "Received!\\n\\n"
-        "Send HASH (64 chars):\\n\\n"
-        "Example:\\n"
-        "<code>a65b33369cf0bcd1b4e7a47f00e6536612210aeb0ddb4e6ac557c9f83d316545</code>"
-    )
+'''
 
-    @staticmethod
+# TXID request
+if 'txid_req' in msgs:
+    t = msgs['txid_req'].replace('\\n', '\\\\n')
+    out += f'    TXID_REQUEST = "{t}"\n\n'
+else:
+    out += '    TXID_REQUEST = "Send HASH (64 chars)"\n\n'
+
+# TXID received
+out += '''    @staticmethod
     def txid_received(txid: str, output_coin: str, network: str):
         return (
-            f"TXID received!\\n\\n"
+            f"TXID OK!\\n\\n"
             f"<code>{txid[:32]}\\n{txid[32:]}</code>\\n\\n"
-            f"Send your {output_coin} ({network}) address:\\n\\n"
-            f"Example:\\n"
-            f"<code>TVQXrLPpULB6y4KnJMyZorxWQqR7UhhL3g</code>"
+            f"Send {output_coin} ({network}) address"
         )
 
-    @staticmethod
+'''
+
+# Address saved
+out += '''    @staticmethod
     def address_saved(address: str, txid: str, coin_name: str, output_coin: str, confs: int):
         return (
-            f"Saved {output_coin} address:\\n"
+            f"Saved {output_coin}:\\n"
             f"<code>{address}</code>\\n\\n"
-            f"Checking transfer...\\n\\n"
-            f"Details:\\n"
-            f"* TXID: <code>{txid[:16]}...{txid[-8:]}</code>\\n"
-            f"* {coin_name} -> {output_coin}\\n"
-            f"* Confs: 0/{confs}\\n\\n"
-            f"Please wait...\\n"
-            f"Notifications here."
+            f"TXID: <code>{txid[:16]}...</code>\\n"
+            f"{coin_name} -> {output_coin}\\n"
+            f"Confs: 0/{confs}\\n\\n"
+            f"Please wait..."
         )
 
-    STATUS_NEW = "New"
+'''
+
+# Statuses
+out += '''    STATUS_NEW = "New"
     STATUS_CONFIRMING = "Confirming"
     STATUS_CONFIRMED = "Confirmed"
     STATUS_SOLD = "Sold"
@@ -155,19 +165,12 @@ output += '''    BTN_NEW_EXCHANGE = "New /start"
     STATUS_ERROR = "Error"
 
     STATUS_EMOJI = {
-        "NEW": "new",
-        "CONFIRMING": "wait",
-        "CONFIRMED": "ok",
-        "SOLD": "sold",
-        "WITHDRAWN": "done",
-        "TRADE_FAILED": "fail",
-        "PROCESSING_ERROR": "err"
+        "NEW": "new", "CONFIRMING": "wait", "CONFIRMED": "ok",
+        "SOLD": "sold", "WITHDRAWN": "done",
+        "TRADE_FAILED": "fail", "PROCESSING_ERROR": "err"
     }
 
-    NO_TRANSACTIONS = (
-        "No transactions.\\n"
-        "Click /start to begin."
-    )
+    NO_TRANSACTIONS = "No transactions. /start"
 
     @staticmethod
     def transaction_history_header():
@@ -176,119 +179,61 @@ output += '''    BTN_NEW_EXCHANGE = "New /start"
     @staticmethod
     def transaction_item(coin: str, output_coin: str, status: str, confs: int, required: int, amount: float = None):
         emoji = MSG.STATUS_EMOJI.get(status, "?")
-        text = f"* {coin} -> {output_coin}\\n"
-        text += f"   Status: {emoji} {status}\\n"
-        text += f"   Confs: {confs}/{required}\\n"
-        if amount:
-            text += f"   Amount: {amount:.4f}\\n"
+        text = f"* {coin} -> {output_coin}\\n   Status: {emoji}\\n   Confs: {confs}/{required}\\n"
+        if amount: text += f"   Amount: {amount:.4f}\\n"
         return text + "\\n"
 
-    INVALID_COIN = "Select from buttons:"
+'''
 
-    TXID_ALREADY_USED = (
-        "Transaction used.\\n\\n"
-        "Send NEW HASH:\\n\\n"
-        "Example:\\n"
-        "<code>6559ce2924b306bde3ca6433b92e9bac94821f587fda74ada758fd8477cf4f16</code>"
-    )
+# Error messages
+inv_coin = msgs.get('invalid_coin', 'Select from buttons')
+out += f'    INVALID_COIN = "{inv_coin}"\n\n'
 
-    TXID_ALREADY_USED_BY_YOU = "Already used by you.\\nSend NEW."
+out += '''    TXID_ALREADY_USED = "Transaction already used. Send NEW HASH."
+    TXID_ALREADY_USED_BY_YOU = "Already used by you."
     TXID_ALREADY_USED_BY_OTHER = "Used by another user."
 
-    INVALID_TXID = (
-        "Invalid format.\\n\\n"
-        "TXID: 64 chars (0-9, a-f)."
-    )
+'''
 
-    INVALID_ADDRESS = (
-        "Invalid address.\\n\\n"
-        "TRC20: starts T, 34 chars."
-    )
+inv_txid = msgs.get('invalid_txid', 'Invalid. TXID: 64 chars (0-9, a-f).')
+out += f'    INVALID_TXID = "{inv_txid}"\n\n'
 
-    SESSION_EXPIRED = "Session expired. /start"
-    BOT_ERROR = "Error. Try /start"
+inv_addr = msgs.get('invalid_addr', 'Invalid. TRC20: starts T, 34 chars.')
+out += f'    INVALID_ADDRESS = "{inv_addr}"\n\n'
+
+out += '''    SESSION_EXPIRED = "Session expired. /start"
+    BOT_ERROR = "Error. /start"
     SESSION_TIMEOUT = "Timeout. /start"
     CANCELLED = "Cancelled. /start"
 
-    UNKNOWN_COMMAND = (
-        "Unknown command.\\n\\n"
-        "Contact operator:\\n\\n"
-        "@Conodoperatorbot\\n\\n"
-        "Or /start for new exchange."
-    )
+    UNKNOWN_COMMAND = "Unknown. Contact @Conodoperatorbot or /start"
 
     DEPOSIT_CONFIRMED = "Deposit confirmed!"
 
-    FAKE_TRANSACTION = (
-        "Invalid transaction.\\n\\n"
-        "Not found on blockchain.\\n"
-        "Check txid."
-    )
+    FAKE_TRANSACTION = "Invalid transaction. Not found on blockchain."
 
     @staticmethod
     def amount_too_small(error_msg: str, txid: str):
-        return (
-            f"Amount insufficient.\\n\\n"
-            f"{error_msg}\\n\\n"
-            f"Minimum $20, after {fee_display()} fee\\n"
-            f"you get ~$18 USDT\\n\\n"
-            f"Contact:\\n"
-            f"@Conodoperatorbot\\n\\n"
-            f"Manual processing.\\n\\n"
-            f"TXID: {txid[:16]}..."
-        )
+        return f"Amount too small.\\n{error_msg}\\nContact @Conodoperatorbot\\nTXID: {txid[:16]}..."
 
     @staticmethod
     def operator_small_amount(user_id: int, usd_val: float, amount: float, coin: str, address: str, txid: str):
-        return (
-            f"ATTENTION: Small\\n\\n"
-            f"User: {user_id}\\n"
-            f"Amount: ${usd_val:.2f} ({amount} {coin})\\n"
-            f"Address: {address}\\n"
-            f"TXID: {txid[:32]}...\\n\\n"
-            f"Contact @Conodoperatorbot."
-        )
+        return f"SMALL AMOUNT\\nUser: {user_id}\\n${usd_val:.2f} ({amount} {coin})\\n{address}\\n{txid[:32]}..."
 
     @staticmethod
     def status_response(txid: str, coin: str, status: str, confs: int, required: int):
         emoji = MSG.STATUS_EMOJI.get(status, "?")
-        status_text = {
-            "NEW": "New",
-            "CONFIRMING": "Confirming",
-            "CONFIRMED": "Confirmed",
-            "SOLD": "Sold",
-            "WITHDRAWN": "Done",
-            "TRADE_FAILED": "Failed",
-            "PROCESSING_ERROR": "Error"
-        }.get(status, status)
-
-        if status in ["CONFIRMED", "SOLD"]:
-            progress_msg = "Soon!"
-        elif status == "CONFIRMING":
-            progress_msg = "Wait..."
-        else:
-            progress_msg = "Checking..."
-
-        return (
-            f"Status\\n\\n"
-            f"TXID: <code>{txid[:16]}...{txid[-8:]}</code>\\n"
-            f"Coin: {coin}\\n"
-            f"Status: {emoji} {status_text}\\n"
-            f"Confs: {confs}/{required}\\n\\n"
-            f"{progress_msg}"
-        )
+        return f"Status: {emoji} {status}\\nTXID: {txid[:16]}...\\n{coin}\\nConfs: {confs}/{required}"
 '''
 
 with open('app/i18n/hy.py', 'w', encoding='utf-8') as f:
-    f.write(output)
+    f.write(out)
 
-print(f"\nWrote app/i18n/hy.py ({len(output)} chars)")
-PYTHON_SCRIPT
+print(f"Wrote app/i18n/hy.py ({len(out)} bytes)")
+PYSCRIPT
+
+# Verify
+python3 -c "from app.i18n.hy import MSG; print('BTN_CHECK:', MSG.BTN_CHECK_STATUS); print('BTN_SENT:', MSG.BTN_I_SENT)"
 
 echo ""
-echo "=============================================="
-echo "Installation complete!"
-echo "=============================================="
-echo ""
-echo "Restart services:"
-echo "  systemctl restart convertbot-bot.service convertbot-worker.service"
+echo "Done! Restart: systemctl restart convertbot-bot.service"
