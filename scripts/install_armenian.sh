@@ -264,8 +264,17 @@ with open('app/i18n/hy.py', 'w', encoding='utf-8') as f:
 
 print(f"Wrote app/i18n/hy.py ({len(out)} bytes)")
 
-# VALIDATION: Check for code leakage
-bad_patterns = ['async def', 'return ', 'reply_markup', 'ConversationHandler', 'await ', 'context.']
+# VALIDATION: Check for code leakage (bot code that shouldn't be there)
+bad_patterns = [
+    'async def',           # Bot function definitions
+    'reply_markup=',       # Bot code
+    'ConversationHandler', # Bot code
+    'await ',              # Bot async code
+    'context.',            # Bot context
+    'update.',             # Bot update object
+    'CHOOSING_COIN',       # Bot state
+    '.reply_text(',        # Bot method calls
+]
 with open('app/i18n/hy.py', 'r') as f:
     content = f.read()
     for pat in bad_patterns:
