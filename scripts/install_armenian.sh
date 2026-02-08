@@ -166,9 +166,9 @@ out += '''    @staticmethod
 # TXID request
 if txid_req:
     t = txid_req.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-    out += f'    TXID_REQUEST = "{t}"\\n\\n'
+    out += f'    TXID_REQUEST = "{t}"\n\n'
 else:
-    out += '    TXID_REQUEST = "Send HASH (64 chars)"\\n\\n'
+    out += '    TXID_REQUEST = "Send HASH (64 chars)"\n\n'
 
 out += '''    @staticmethod
     def txid_received(txid: str, output_coin: str, network: str):
@@ -221,9 +221,9 @@ out += '''    @staticmethod
 # Error messages
 if invalid_coin:
     inv = invalid_coin.replace('\\', '\\\\').replace('"', '\\"')
-    out += f'    INVALID_COIN = "{inv}"\\n\\n'
+    out += f'    INVALID_COIN = "{inv}"\n\n'
 else:
-    out += '    INVALID_COIN = "Select from buttons"\\n\\n'
+    out += '    INVALID_COIN = "Select from buttons"\n\n'
 
 out += '''    TXID_ALREADY_USED = "Transaction already used. Send NEW HASH."
     TXID_ALREADY_USED_BY_YOU = "Already used by you."
