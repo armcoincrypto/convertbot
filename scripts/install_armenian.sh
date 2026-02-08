@@ -36,35 +36,37 @@ for line in src.split('\n'):
             if '\u054d\u057f\u0578\u0582\u0563' in t: btns['check'] = t
             elif '\u0565\u0574' in t: btns['sent'] = t
 
-# Extract messages by finding reply_text patterns
+# Extract messages
 msgs = {}
 
-# Welcome - find the first big Armenian message
-m = re.search(r'reply_text\(\s*"([^\n]+\\n[^\n]+\\n[^\n]+\\n[^\n]+\\n[^"]+)"', src)
-if m: msgs['welcome'] = m.group(1)
+# Welcome - look for the multi-line Armenian greeting (Delays = Hello)
+m = re.search(r'reply_text\(\s*"(\U0001f44b[^"]+)"[^)]*\s*"([^"]+)"[^)]*\s*"([^"]+)"[^)]*\s*"([^"]+)"', src)
+if m:
+    msgs['welcome'] = m.group(1) + m.group(2) + m.group(3) + m.group(4)
+    print(f"Welcome found: {msgs['welcome'][:50]}...")
 
-# TXID request - contains HASH
-m = re.search(r'"([^"]*HASH[^"]+64[^"]+)"', src)
-if m: msgs['txid_req'] = m.group(1)
-
-# TXID received - contains TXID + address request
-m = re.search(r'"(TXID[^"]+\{output_coin\}[^"]+)"', src)
-if m: msgs['txid_recv'] = m.group(1)
-
-# Invalid coin
-m = re.search(r'"([^"]+\u0568\u0576\u057f\u0580\u0565\u056c[^"]+)"', src)  # delays
+# Invalid coin - delays delays
+m = re.search(r'"(\u053d\u0576\u0564\u0580\u0578\u0582\u0574[^"]+)"', src)
 if m: msgs['invalid_coin'] = m.group(1)
 
-# Already used
-m = re.search(r'"(\u274c[^"]+\u0576\u0578\u0580[^"]+)"', src, re.IGNORECASE)
-if m: msgs['already_used'] = m.group(1)
+# Deposit address message
+m = re.search(r'f"(\u0541\u0565\u0580[^"]+)"', src)  # Delays = Your
+if m: msgs['deposit'] = m.group(1)
+
+# TXID request
+m = re.search(r'"(\u054d\u057f\u0561\u0581\u057e\u0565\u0581[^"]+)"', src)  # Delays = Received
+if m: msgs['txid_req'] = m.group(1)
+
+# TXID already used
+m = re.search(r'"(\u274c \u0531\u0575\u057d[^"]+)"', src)  # Delays Delays
+if m: msgs['txid_used'] = m.group(1)
 
 # Invalid TXID
-m = re.search(r'"(\u274c[^"]+64[^"]+a-f[^"]+)"', src)
+m = re.search(r'"(\u274c \u054d\u056d\u0561\u056c[^"]+64[^"]+)"', src)  # Delays Delays
 if m: msgs['invalid_txid'] = m.group(1)
 
 # Invalid address
-m = re.search(r'"(\u274c[^"]+TRC20[^"]+)"', src)
+m = re.search(r'"(\u274c \u054d\u056d\u0561\u056c[^"]+TRC20[^"]+)"', src)
 if m: msgs['invalid_addr'] = m.group(1)
 
 print("Buttons:", list(btns.keys()))
@@ -95,7 +97,10 @@ out += '    BTN_START = "/start"\n\n'
 
 # Welcome - need to process and add fee_display()
 if 'welcome' in msgs:
-    w = msgs['welcome'].replace('3% + $1', '{fee_display()}').replace('\\n', '\\\\n')
+    # Replace fee with dynamic value and escape for f-string
+    w = msgs['welcome'].replace('3% + $1', '{fee_display()}')
+    # Handle newlines properly
+    w = w.replace('\n', '\\n')
     out += f'''    @staticmethod
     def welcome():
         return f"{w}"
@@ -185,12 +190,13 @@ out += '''    STATUS_NEW = "New"
 
 '''
 
-# Error messages
+# Error messages - use Armenian if extracted
 inv_coin = msgs.get('invalid_coin', 'Select from buttons')
 out += f'    INVALID_COIN = "{inv_coin}"\n\n'
 
-out += '''    TXID_ALREADY_USED = "Transaction already used. Send NEW HASH."
-    TXID_ALREADY_USED_BY_YOU = "Already used by you."
+txid_used = msgs.get('txid_used', 'Transaction already used. Send NEW HASH.')
+out += f'    TXID_ALREADY_USED = "{txid_used}"\n'
+out += '''    TXID_ALREADY_USED_BY_YOU = "Already used by you."
     TXID_ALREADY_USED_BY_OTHER = "Used by another user."
 
 '''
