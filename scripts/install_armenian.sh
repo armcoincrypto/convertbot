@@ -292,6 +292,10 @@ python3 -m py_compile app/i18n/hy.py || { echo "SYNTAX ERROR in hy.py!"; exit 1;
 # Verify import works
 python3 -c "from app.i18n.hy import MSG; print('BTN_CHECK:', MSG.BTN_CHECK_STATUS); print('Welcome preview:', MSG.welcome()[:50])"
 
+# Verify API compatibility with en/ru
+echo "Checking API compatibility..."
+python3 scripts/check_i18n.py || { echo "API MISMATCH!"; exit 1; }
+
 echo ""
 echo "=============================================="
 echo "Installation complete!"
