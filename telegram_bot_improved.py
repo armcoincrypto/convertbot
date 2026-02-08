@@ -62,10 +62,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING_COIN
 
 
+CHOOSING_LANG = 10  # New state for language selection
+
+
 async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /lang command - show language selection or set language."""
     user_id = update.effective_user.id
     args = context.args
+
+    # Clear any conversation state
+    context.user_data.clear()
 
     # If language code provided directly: /lang hy, /lang ru, /lang en
     if args and len(args) >= 1:
@@ -77,12 +83,15 @@ async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Language set to {LANG_NAMES.get(lang_code, lang_code)}",
                 reply_markup=ReplyKeyboardRemove()
             )
-            return
+            return ConversationHandler.END
         else:
             await update.message.reply_text(
                 f"Unknown language: {lang_code}\nAvailable: hy, ru, en"
             )
-            return
+            return ConversationHandler.END
+
+    # Set flag that we're waiting for language selection
+    context.user_data["waiting_lang"] = True
 
     # Show language selection keyboard
     keyboard = [
@@ -95,6 +104,7 @@ async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Select language / Vyberi yazyk / Yntrek lezu:",
         reply_markup=reply_markup
     )
+    return CHOOSING_LANG
 
 
 async def lang_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -113,14 +123,17 @@ async def lang_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if lang_code:
         await set_user_lang(user_id, lang_code)
         MSG = get_msg(lang_code)
+        context.user_data.clear()
         await update.message.reply_text(
-            f"Language: {LANG_NAMES.get(lang_code, lang_code)}",
+            f"Language: {LANG_NAMES.get(lang_code, lang_code)}\n\nPress /start to continue.",
             reply_markup=ReplyKeyboardRemove()
         )
+        return ConversationHandler.END
     else:
         await update.message.reply_text(
             "Please select: Hayeren / English / Russkiy"
         )
+        return CHOOSING_LANG
 
 
 async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -374,16 +387,21 @@ def main():
     application = Application.builder().token(settings.telegram_bot_token).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("lang", lang_command),
+        ],
         states={
             CHOOSING_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, coin_chosen)],
             WAITING_TXID: [MessageHandler(filters.TEXT & ~filters.COMMAND, waiting_for_txid)],
             WAITING_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_received)],
+            CHOOSING_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, lang_selection)],
             ConversationHandler.TIMEOUT: [MessageHandler(filters.ALL, timeout_handler)],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
             CommandHandler("start", start),
+            CommandHandler("lang", lang_command),
         ],
         conversation_timeout=600,  # 10 minute timeout
         per_user=True,
@@ -391,15 +409,6 @@ def main():
     )
 
     application.add_handler(conv_handler)
-
-    # Language command handler
-    application.add_handler(CommandHandler("lang", lang_command))
-
-    # Handler for language selection (from keyboard)
-    application.add_handler(MessageHandler(
-        filters.Regex("(?i)^(hayeren|english|russkiy)$"),
-        lang_selection
-    ))
 
     # Handler for check commands
     application.add_handler(CommandHandler("status", check_transaction))
