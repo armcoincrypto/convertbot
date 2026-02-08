@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Install Armenian i18n by extracting ALL strings from git history
+# Install Armenian i18n by extracting strings from git history
 # Run on VPS: bash scripts/install_armenian.sh
 #
 set -e
@@ -14,16 +14,17 @@ echo "=============================================="
 git show d693785:telegram_bot_improved.py > /tmp/orig.py
 echo "Extracted original ($(wc -c < /tmp/orig.py) bytes)"
 
-# Generate hy.py using Python - all Armenian comes from /tmp/orig.py
+# Generate hy.py using Python - SAFE extraction of string literals only
 python3 << 'PYSCRIPT'
 import re
 
 with open('/tmp/orig.py', 'r', encoding='utf-8') as f:
     src = f.read()
+    lines = src.split('\n')
 
-# Extract all KeyboardButton texts
+# Extract KeyboardButton texts
 btns = {}
-for line in src.split('\n'):
+for line in lines:
     m = re.search(r'KeyboardButton\("([^"]+)"\)', line)
     if m:
         t = m.group(1)
@@ -36,43 +37,75 @@ for line in src.split('\n'):
             if '\u054d\u057f\u0578\u0582\u0563' in t: btns['check'] = t
             elif '\u0565\u0574' in t: btns['sent'] = t
 
-# Extract messages
-msgs = {}
+def extract_string_block(lines, start_pattern, end_patterns=['reply_markup', 'parse_mode']):
+    """Extract ONLY string literals from a reply_text block."""
+    result = []
+    in_block = False
 
-# Welcome - look for the multi-line Armenian greeting (Delays = Hello)
-m = re.search(r'reply_text\(\s*"(\U0001f44b[^"]+)"[^)]*\s*"([^"]+)"[^)]*\s*"([^"]+)"[^)]*\s*"([^"]+)"', src)
-if m:
-    msgs['welcome'] = m.group(1) + m.group(2) + m.group(3) + m.group(4)
-    print(f"Welcome found: {msgs['welcome'][:50]}...")
+    for i, line in enumerate(lines):
+        if start_pattern in line:
+            in_block = True
+            continue
 
-# Invalid coin - delays delays
-m = re.search(r'"(\u053d\u0576\u0564\u0580\u0578\u0582\u0574[^"]+)"', src)
-if m: msgs['invalid_coin'] = m.group(1)
+        if in_block:
+            # Stop if we hit non-string content
+            stripped = line.strip()
+            if any(ep in stripped for ep in end_patterns):
+                break
+            if stripped.startswith(')'):
+                break
+            if 'return ' in stripped:
+                break
+            if stripped.startswith('async ') or stripped.startswith('def '):
+                break
 
-# Deposit address message
-m = re.search(r'f"(\u0541\u0565\u0580[^"]+)"', src)  # Delays = Your
-if m: msgs['deposit'] = m.group(1)
+            # Extract only quoted string content
+            # Match: "..." or f"..."
+            m = re.match(r'\s*(?:f)?"([^"]*)"', line)
+            if m:
+                result.append(m.group(1))
+            else:
+                # No more strings, stop
+                if stripped and not stripped.startswith('#'):
+                    break
 
-# TXID request
-m = re.search(r'"(\u054d\u057f\u0561\u0581\u057e\u0565\u0581[^"]+)"', src)  # Delays = Received
-if m: msgs['txid_req'] = m.group(1)
+    return ''.join(result) if result else None
 
-# TXID already used
-m = re.search(r'"(\u274c \u0531\u0575\u057d[^"]+)"', src)  # Delays Delays
-if m: msgs['txid_used'] = m.group(1)
+# Extract welcome message from start() function
+welcome = extract_string_block(lines, 'async def start')
+if not welcome:
+    # Try finding the first reply_text with Armenian greeting
+    for i, line in enumerate(lines):
+        if 'reply_text(' in line and i < 100:  # Only in first 100 lines
+            welcome = extract_string_block(lines[i:], 'reply_text(')
+            if welcome and '\u0532\u0561\u0580\u0587' in welcome:  # Delays
+                break
+            welcome = None
 
-# Invalid TXID
-m = re.search(r'"(\u274c \u054d\u056d\u0561\u056c[^"]+64[^"]+)"', src)  # Delays Delays
-if m: msgs['invalid_txid'] = m.group(1)
+# Extract invalid coin message
+invalid_coin = None
+for i, line in enumerate(lines):
+    m = re.search(r'reply_text\("([^"]+\u0568\u0576\u057f\u0580\u0565\u056c[^"]+)"\)', line)
+    if m:
+        invalid_coin = m.group(1)
+        break
 
-# Invalid address
-m = re.search(r'"(\u274c \u054d\u056d\u0561\u056c[^"]+TRC20[^"]+)"', src)
-if m: msgs['invalid_addr'] = m.group(1)
+# Extract TXID request (Delays = Received)
+txid_req = None
+for i, line in enumerate(lines):
+    m = re.search(r'"(\u054d\u057f\u0561\u0581\u057e\u0565\u0581[^"]+)"', line)
+    if m:
+        txid_req = m.group(1)
+        break
 
 print("Buttons:", list(btns.keys()))
-print("Messages:", list(msgs.keys()))
+print("Welcome:", "FOUND" if welcome else "NOT FOUND")
+if welcome:
+    # Show first 60 chars, ensure no code leaked
+    preview = welcome[:60].replace('\n', '\\n')
+    print(f"  Preview: {preview}...")
 
-# Build output file
+# Build output file - CLEAN strings only
 out = '''# -*- coding: utf-8 -*-
 """Armenian UI messages for Convertbot - extracted from commit d693785"""
 from app.config import fee_display
@@ -95,11 +128,13 @@ out += '    BTN_NEW_EXCHANGE = "/start"\n'
 out += '    BTN_CHECK = "Check"\n'
 out += '    BTN_START = "/start"\n\n'
 
-# Welcome - need to process and add fee_display()
-if 'welcome' in msgs:
-    # Replace fee with dynamic value and escape for f-string
-    w = msgs['welcome'].replace('3% + $1', '{fee_display()}')
-    # Handle newlines properly
+# Welcome - use extracted or fallback
+if welcome:
+    # Replace fee placeholder and escape properly
+    w = welcome.replace('3% + $1', '{fee_display()}')
+    # Escape backslashes and quotes for Python string
+    w = w.replace('\\', '\\\\').replace('"', '\\"')
+    # Convert actual newlines to \n
     w = w.replace('\n', '\\n')
     out += f'''    @staticmethod
     def welcome():
@@ -113,7 +148,7 @@ else:
 
 '''
 
-# Deposit address - keep as template
+# Rest of the template with safe defaults
 out += '''    @staticmethod
     def deposit_address(address: str, coin_name: str, output_coin: str, network: str, confs: int):
         return (
@@ -129,13 +164,12 @@ out += '''    @staticmethod
 '''
 
 # TXID request
-if 'txid_req' in msgs:
-    t = msgs['txid_req'].replace('\\n', '\\\\n')
-    out += f'    TXID_REQUEST = "{t}"\n\n'
+if txid_req:
+    t = txid_req.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+    out += f'    TXID_REQUEST = "{t}"\\n\\n'
 else:
-    out += '    TXID_REQUEST = "Send HASH (64 chars)"\n\n'
+    out += '    TXID_REQUEST = "Send HASH (64 chars)"\\n\\n'
 
-# TXID received
 out += '''    @staticmethod
     def txid_received(txid: str, output_coin: str, network: str):
         return (
@@ -144,10 +178,7 @@ out += '''    @staticmethod
             f"Send {output_coin} ({network}) address"
         )
 
-'''
-
-# Address saved
-out += '''    @staticmethod
+    @staticmethod
     def address_saved(address: str, txid: str, coin_name: str, output_coin: str, confs: int):
         return (
             f"Saved {output_coin}:\\n"
@@ -158,10 +189,7 @@ out += '''    @staticmethod
             f"Please wait..."
         )
 
-'''
-
-# Statuses
-out += '''    STATUS_NEW = "New"
+    STATUS_NEW = "New"
     STATUS_CONFIRMING = "Confirming"
     STATUS_CONFIRMED = "Confirmed"
     STATUS_SOLD = "Sold"
@@ -190,24 +218,22 @@ out += '''    STATUS_NEW = "New"
 
 '''
 
-# Error messages - use Armenian if extracted
-inv_coin = msgs.get('invalid_coin', 'Select from buttons')
-out += f'    INVALID_COIN = "{inv_coin}"\n\n'
+# Error messages
+if invalid_coin:
+    inv = invalid_coin.replace('\\', '\\\\').replace('"', '\\"')
+    out += f'    INVALID_COIN = "{inv}"\\n\\n'
+else:
+    out += '    INVALID_COIN = "Select from buttons"\\n\\n'
 
-txid_used = msgs.get('txid_used', 'Transaction already used. Send NEW HASH.')
-out += f'    TXID_ALREADY_USED = "{txid_used}"\n'
-out += '''    TXID_ALREADY_USED_BY_YOU = "Already used by you."
+out += '''    TXID_ALREADY_USED = "Transaction already used. Send NEW HASH."
+    TXID_ALREADY_USED_BY_YOU = "Already used by you."
     TXID_ALREADY_USED_BY_OTHER = "Used by another user."
 
-'''
+    INVALID_TXID = "Invalid. TXID: 64 chars (0-9, a-f)."
 
-inv_txid = msgs.get('invalid_txid', 'Invalid. TXID: 64 chars (0-9, a-f).')
-out += f'    INVALID_TXID = "{inv_txid}"\n\n'
+    INVALID_ADDRESS = "Invalid. TRC20: starts T, 34 chars."
 
-inv_addr = msgs.get('invalid_addr', 'Invalid. TRC20: starts T, 34 chars.')
-out += f'    INVALID_ADDRESS = "{inv_addr}"\n\n'
-
-out += '''    SESSION_EXPIRED = "Session expired. /start"
+    SESSION_EXPIRED = "Session expired. /start"
     BOT_ERROR = "Error. /start"
     SESSION_TIMEOUT = "Timeout. /start"
     CANCELLED = "Cancelled. /start"
@@ -232,14 +258,33 @@ out += '''    SESSION_EXPIRED = "Session expired. /start"
         return f"Status: {emoji} {status}\\nTXID: {txid[:16]}...\\n{coin}\\nConfs: {confs}/{required}"
 '''
 
+# Write file
 with open('app/i18n/hy.py', 'w', encoding='utf-8') as f:
     f.write(out)
 
 print(f"Wrote app/i18n/hy.py ({len(out)} bytes)")
+
+# VALIDATION: Check for code leakage
+bad_patterns = ['async def', 'return ', 'reply_markup', 'ConversationHandler', 'await ', 'context.']
+with open('app/i18n/hy.py', 'r') as f:
+    content = f.read()
+    for pat in bad_patterns:
+        if pat in content:
+            print(f"ERROR: Found code fragment '{pat}' in hy.py!")
+            exit(1)
+
+print("Validation: OK (no code leakage)")
 PYSCRIPT
 
-# Verify
-python3 -c "from app.i18n.hy import MSG; print('BTN_CHECK:', MSG.BTN_CHECK_STATUS); print('BTN_SENT:', MSG.BTN_I_SENT)"
+# Verify Python syntax
+echo "Checking Python syntax..."
+python3 -m py_compile app/i18n/hy.py || { echo "SYNTAX ERROR in hy.py!"; exit 1; }
+
+# Verify import works
+python3 -c "from app.i18n.hy import MSG; print('BTN_CHECK:', MSG.BTN_CHECK_STATUS); print('Welcome preview:', MSG.welcome()[:50])"
 
 echo ""
-echo "Done! Restart: systemctl restart convertbot-bot.service"
+echo "=============================================="
+echo "Installation complete!"
+echo "=============================================="
+echo "Restart: systemctl restart convertbot-bot.service"
