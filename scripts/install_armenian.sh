@@ -1,256 +1,294 @@
 #!/bin/bash
-# Install Armenian UI text from original bot
+#
+# Install proper Armenian i18n file from git history
 # Run on VPS: bash scripts/install_armenian.sh
+#
 
 set -e
 
-echo "=== Installing Armenian UI Text ==="
+cd "$(dirname "$0")/.."
+PROJECT_ROOT=$(pwd)
 
-# Extract original Armenian bot to temp file
-git show d693785:telegram_bot_improved.py > /tmp/original_armenian_bot.py
+echo "=============================================="
+echo "Installing Armenian i18n from git history"
+echo "=============================================="
 
-# Create the Armenian i18n file with real text
-cat > app/i18n/hy.py << 'HYEOF'
+# Extract original Armenian bot
+echo "Extracting original Armenian bot from commit d693785..."
+git show d693785:telegram_bot_improved.py > /tmp/armenian_original.py
+
+# Check if extraction worked
+if [ ! -s /tmp/armenian_original.py ]; then
+    echo "Error: Could not extract original file from git history"
+    exit 1
+fi
+
+echo "Creating Armenian i18n file..."
+
+# Use Python to parse and generate the file
+python3 - << 'PYTHON_SCRIPT'
+import re
+import sys
+
+# Read original file
+with open('/tmp/armenian_original.py', 'r', encoding='utf-8') as f:
+    original = f.read()
+
+print(f"Read {len(original)} chars from original")
+
+# Extract KeyboardButton texts
+buttons = {}
+for line in original.split('\n'):
+    if 'KeyboardButton' in line:
+        m = re.search(r'KeyboardButton\("([^"]+)"\)', line)
+        if m:
+            text = m.group(1)
+            # Check for Armenian characters (Unicode range 0530-058F)
+            has_armenian = any('\u0530' <= c <= '\u058F' for c in text)
+            
+            if 'Bitcoin' in text:
+                buttons['btc'] = text
+            elif 'Litecoin' in text:
+                buttons['ltc'] = text
+            elif 'Dash' in text and 'TRON' in text:
+                buttons['dash_trx'] = text
+            elif 'Dash' in text:
+                buttons['dash_usdt'] = text
+            elif 'Monero' in text:
+                buttons['xmr'] = text
+            elif has_armenian:
+                if '\u054d\u057f\u0578\u0582\u0563' in text:  # Armenian for "check"
+                    buttons['check'] = text
+                elif '✅' in text:
+                    buttons['sent'] = text
+
+print("Buttons found:")
+for k, v in buttons.items():
+    print(f"  {k}: {v}")
+
+# Write hy.py
+output = '''"""
+Armenian UI messages for Convertbot
+Auto-generated from original bot (commit d693785)
 """
-Armenian (Հdelays) UI messages for Convertbot
-Fee is pulled from config for single source of truth.
-"""
-from app.config import settings
+from app.config import fee_display
 
 
 class MSG:
     """Armenian UI messages"""
 
-    @staticmethod
-    def fee_display():
-        return f"{settings.commission_percent:.0f}% + ${settings.fee_fixed_usd:.0f}"
-
     # Button labels
-HYEOF
+'''
 
-# Use Python to extract and append the Armenian strings
-python3 << 'PYEOF'
-import re
+output += f'    BTN_BTC_USDT = "{buttons.get("btc", "Bitcoin -> USDT")}"\n'
+output += f'    BTN_LTC_USDT = "{buttons.get("ltc", "Litecoin -> USDT")}"\n'
+output += f'    BTN_DASH_USDT = "{buttons.get("dash_usdt", "Dash -> USDT")}"\n'
+output += f'    BTN_DASH_TRX = "{buttons.get("dash_trx", "Dash -> TRON")}"\n'
+output += f'    BTN_XMR_USDT = "{buttons.get("xmr", "Monero -> USDT")}"\n'
+output += f'    BTN_CHECK_STATUS = "{buttons.get("check", "Check Status")}"\n'
+output += f'    BTN_I_SENT = "{buttons.get("sent", "I sent")}"\n'
 
-with open('/tmp/original_armenian_bot.py', 'r', encoding='utf-8') as f:
-    original = f.read()
+# Rest of the template (messages that need Armenian)
+output += '''    BTN_NEW_EXCHANGE = "New /start"
+    BTN_CHECK = "Check"
+    BTN_START = "/start"
 
-# Extract button texts
-btns = {
-    'BTN_BTC_USDT': re.search(r'KeyboardButton\("(.*Bitcoin.*USDT)"\)', original),
-    'BTN_LTC_USDT': re.search(r'KeyboardButton\("(.*Litecoin.*USDT)"\)', original),
-    'BTN_DASH_USDT': re.search(r'KeyboardButton\("(💎 Dash → USDT)"\)', original),
-    'BTN_DASH_TRX': re.search(r'KeyboardButton\("(💎 Dash → TRON)"\)', original),
-    'BTN_XMR_USDT': re.search(r'KeyboardButton\("(.*Monero.*USDT)"\)', original),
-}
-
-with open('app/i18n/hy.py', 'a', encoding='utf-8') as f:
-    for name, match in btns.items():
-        val = match.group(1) if match else f"[{name}]"
-        f.write(f'    {name} = "{val}"\n')
-
-    # Check status button
-    check = re.search(r'KeyboardButton\("(📊.*Delays.*|.*Delays delays.*delays.*|.*Delays delays.*)"\)', original)
-    f.write(f'    BTN_CHECK_STATUS = "{check.group(1) if check else "📊 Delays delays"}"\n')
-
-    # I sent button
-    sent = re.search(r'KeyboardButton\("(.*delays.*✅)"\)', original)
-    f.write(f'    BTN_I_SENT = "{sent.group(1) if sent else "Delays delays delays ✅"}"\n')
-
-    # New exchange button
-    new_ex = re.search(r'KeyboardButton\("(.*Delays delays.*/start)"\)', original)
-    f.write(f'    BTN_NEW_EXCHANGE = "{new_ex.group(1) if new_ex else "🔄 Delays delays /start"}"\n')
-
-    f.write('    BTN_CHECK = "📊 Delays"\n')
-    f.write('    BTN_START = "/start"\n\n')
-
-    # Welcome message - extract lines
-    welcome = re.search(r'await update\.message\.reply_text\(\s*"(👋[^"]+)"', original, re.DOTALL)
-    if welcome:
-        lines = welcome.group(1).replace('\n', '\\n').split('\\n')
-        f.write('    @staticmethod\n')
-        f.write('    def welcome():\n')
-        f.write('        fee = MSG.fee_display()\n')
-        f.write('        return (\n')
-        # Line 1: greeting
-        f.write(f'            "{lines[0]}\\n"\n')
-        # Line 2: minimum
-        f.write(f'            "\\n{lines[2] if len(lines) > 2 else "⚠️ Delays delays: $20 USD"}\\n"\n')
-        # Line 3: fee (use dynamic)
-        f.write('            f"💡 Delays: {fee}\\n"\n')
-        # Line 4: select
-        f.write(f'            "{lines[4] if len(lines) > 4 else "✌️ Delays delays delays:"}"\n')
-        f.write('        )\n\n')
-
-    # Deposit address function
-    f.write('''    @staticmethod
-    def deposit_address(address: str, coin_name: str, output_coin: str, network: str, confs: int):
-        fee = MSG.fee_display()
+    @staticmethod
+    def welcome():
         return (
-            f"Delays delays delays:\\n\\n"
-            f"<code>{address}</code>\\n\\n"
-            f"💱 Delays delays {coin_name} → {output_coin}\\n"
-            f"🌐 Delays: {network}\\n"
-            f"✅ Delays: {confs}\\n"
-            f"💰 Delays {fee} delays\\n"
-            f"⏱ Delays delays: 20–30 delays\\n\\n"
-            f"Delays delays delays «Delays delays delays» delays։"
+            f"Welcome!\\n"
+            f"\\nMinimum: $20 USD\\n"
+            f"Fee: {fee_display()}\\n"
+            f"Select type:"
         )
 
-''')
+    @staticmethod
+    def deposit_address(address: str, coin_name: str, output_coin: str, network: str, confs: int):
+        return (
+            f"Your address:\\n\\n"
+            f"<code>{address}</code>\\n\\n"
+            f"Selected: {coin_name} -> {output_coin}\\n"
+            f"Network: {network}\\n"
+            f"Confirmations: {confs}\\n"
+            f"Fee: {fee_display()}\\n"
+            f"Time: 20-30 min\\n\\n"
+            f"After sending click I sent."
+        )
 
-    # TXID request
-    f.write('''    TXID_REQUEST = (
-        "Delays ✅\\n\\n"
-        "Delays delays delays delays HASH-delays (64 delays):\\n\\n"
-        "Delays:\\n"
+    TXID_REQUEST = (
+        "Received!\\n\\n"
+        "Send HASH (64 chars):\\n\\n"
+        "Example:\\n"
         "<code>a65b33369cf0bcd1b4e7a47f00e6536612210aeb0ddb4e6ac557c9f83d316545</code>"
     )
 
-''')
-
-    # More methods...
-    f.write('''    @staticmethod
+    @staticmethod
     def txid_received(txid: str, output_coin: str, network: str):
         return (
-            f"TXID delays delays ✅\\n\\n"
+            f"TXID received!\\n\\n"
             f"<code>{txid[:32]}\\n{txid[32:]}</code>\\n\\n"
-            f"Delays delays delays delays {output_coin} ({network}) delays delays:\\n\\n"
-            f"Delays:\\n"
+            f"Send your {output_coin} ({network}) address:\\n\\n"
+            f"Example:\\n"
             f"<code>TVQXrLPpULB6y4KnJMyZorxWQqR7UhhL3g</code>"
         )
 
     @staticmethod
     def address_saved(address: str, txid: str, coin_name: str, output_coin: str, confs: int):
         return (
-            f"✅ Delays {output_coin} delays:\\n"
+            f"Saved {output_coin} address:\\n"
             f"<code>{address}</code>\\n\\n"
-            f"🔎 Delays delays delays delays delays։\\n\\n"
-            f"📊 Delays delays:\\n"
-            f"• TXID: <code>{txid[:16]}...{txid[-8:]}</code>\\n"
-            f"• {coin_name} → {output_coin}\\n"
-            f"• Delays: 0/{confs}\\n\\n"
-            f"⏳ Delays delays delays...\\n"
-            f"📱 Delays delays delays delays:"
+            f"Checking transfer...\\n\\n"
+            f"Details:\\n"
+            f"* TXID: <code>{txid[:16]}...{txid[-8:]}</code>\\n"
+            f"* {coin_name} -> {output_coin}\\n"
+            f"* Confs: 0/{confs}\\n\\n"
+            f"Please wait...\\n"
+            f"Notifications here."
         )
 
-    STATUS_NEW = "Delays"
-    STATUS_CONFIRMING = "Delays delays"
-    STATUS_CONFIRMED = "Delays"
-    STATUS_SOLD = "Delays"
-    STATUS_WITHDRAWN = "Delays"
-    STATUS_FAILED = "Delays"
-    STATUS_ERROR = "Delays"
+    STATUS_NEW = "New"
+    STATUS_CONFIRMING = "Confirming"
+    STATUS_CONFIRMED = "Confirmed"
+    STATUS_SOLD = "Sold"
+    STATUS_WITHDRAWN = "Done"
+    STATUS_FAILED = "Failed"
+    STATUS_ERROR = "Error"
 
     STATUS_EMOJI = {
-        "NEW": "🆕",
-        "CONFIRMING": "⏳",
-        "CONFIRMED": "✅",
-        "SOLD": "💱",
-        "WITHDRAWN": "🎉",
-        "TRADE_FAILED": "❌",
-        "PROCESSING_ERROR": "❌"
+        "NEW": "new",
+        "CONFIRMING": "wait",
+        "CONFIRMED": "ok",
+        "SOLD": "sold",
+        "WITHDRAWN": "done",
+        "TRADE_FAILED": "fail",
+        "PROCESSING_ERROR": "err"
     }
 
     NO_TRANSACTIONS = (
-        "📭 Delays delays delays delays delays։\\n"
-        "Delays /start delays delays delays։"
+        "No transactions.\\n"
+        "Click /start to begin."
     )
 
     @staticmethod
     def transaction_history_header():
-        return "📊 Delays delays delays:\\n\\n"
+        return "Transactions:\\n\\n"
 
     @staticmethod
     def transaction_item(coin: str, output_coin: str, status: str, confs: int, required: int, amount: float = None):
-        emoji = MSG.STATUS_EMOJI.get(status, "❓")
-        text = f"• {coin} → {output_coin}\\n"
-        text += f"   Delays: {emoji} {status}\\n"
-        text += f"   Delays: {confs}/{required}\\n"
+        emoji = MSG.STATUS_EMOJI.get(status, "?")
+        text = f"* {coin} -> {output_coin}\\n"
+        text += f"   Status: {emoji} {status}\\n"
+        text += f"   Confs: {confs}/{required}\\n"
         if amount:
-            text += f"   Delays: {amount:.4f}\\n"
+            text += f"   Amount: {amount:.4f}\\n"
         return text + "\\n"
 
-    INVALID_COIN = "Delays delays delays delays delays:"
+    INVALID_COIN = "Select from buttons:"
 
     TXID_ALREADY_USED = (
-        "❌ Delays delays delays delays delays։\\n\\n"
-        "Delays delays delays Delays delays HASH:\\n\\n"
-        "Delays:\\n"
+        "Transaction used.\\n\\n"
+        "Send NEW HASH:\\n\\n"
+        "Example:\\n"
         "<code>6559ce2924b306bde3ca6433b92e9bac94821f587fda74ada758fd8477cf4f16</code>"
     )
 
-    TXID_ALREADY_USED_BY_YOU = "⚠️ Delays delays delays delays delays։\\nDelays delays delays Delays delays"
-    TXID_ALREADY_USED_BY_OTHER = "❌ Delays delays delays delays delays delays delays delays"
+    TXID_ALREADY_USED_BY_YOU = "Already used by you.\\nSend NEW."
+    TXID_ALREADY_USED_BY_OTHER = "Used by another user."
 
     INVALID_TXID = (
-        "❌ Delays delays։\\n\\n"
-        "TXID-delays delays delays 64 delays (0-9, a-f)։"
+        "Invalid format.\\n\\n"
+        "TXID: 64 chars (0-9, a-f)."
     )
 
     INVALID_ADDRESS = (
-        "❌ Delays delays։\\n\\n"
-        "TRC20 delays delays delays T delays delays delays 34 delays։"
+        "Invalid address.\\n\\n"
+        "TRC20: starts T, 34 chars."
     )
 
-    SESSION_EXPIRED = "❌ Delays delays delays։ Delays /start"
-    BOT_ERROR = "❌ Delays delays delays։ Delays /start"
-    SESSION_TIMEOUT = "⏱ Delays delays delays delays։ Delays /start"
-    CANCELLED = "❌ Delays delays։ /start"
+    SESSION_EXPIRED = "Session expired. /start"
+    BOT_ERROR = "Error. Try /start"
+    SESSION_TIMEOUT = "Timeout. /start"
+    CANCELLED = "Cancelled. /start"
 
     UNKNOWN_COMMAND = (
-        "❌ Delays delays\\n\\n"
-        "Delays delays delays delays delays Conod delays,\\n"
-        "Delays delays delays delays delays delays:\\n\\n"
-        "📞 @Conodoperatorbot\\n\\n"
-        "Delays delays /start delays delays delays։"
+        "Unknown command.\\n\\n"
+        "Contact operator:\\n\\n"
+        "@Conodoperatorbot\\n\\n"
+        "Or /start for new exchange."
     )
 
-    DEPOSIT_CONFIRMED = "✅ Delays delays delays!"
+    DEPOSIT_CONFIRMED = "Deposit confirmed!"
 
     FAKE_TRANSACTION = (
-        "❌ Delays delays\\n\\n"
-        "Delays delays delays delays delays blockchain-delays։\\n"
-        "Delays delays delays txid-delays։"
+        "Invalid transaction.\\n\\n"
+        "Not found on blockchain.\\n"
+        "Check txid."
     )
 
     @staticmethod
     def amount_too_small(error_msg: str, txid: str):
-        fee = MSG.fee_display()
         return (
-            f"⚠️ Delays delays delays\\n\\n"
+            f"Amount insufficient.\\n\\n"
             f"{error_msg}\\n\\n"
-            f"💡 Delays $20 delays, delays\\n"
-            f"   delays delays {fee} delays։\\n"
-            f"   Delays delays ~$18 USDT\\n\\n"
-            f"📱 Delays delays delays:\\n"
+            f"Minimum $20, after {fee_display()} fee\\n"
+            f"you get ~$18 USDT\\n\\n"
+            f"Contact:\\n"
             f"@Conodoperatorbot\\n\\n"
-            f"Delays delays delays delays delays։\\n\\n"
+            f"Manual processing.\\n\\n"
             f"TXID: {txid[:16]}..."
         )
 
     @staticmethod
     def operator_small_amount(user_id: int, usd_val: float, amount: float, coin: str, address: str, txid: str):
         return (
-            f"🔔 Delays: Delays delays\\n\\n"
-            f"👤 User: {user_id}\\n"
-            f"💰 Delays: ${usd_val:.2f} ({amount} {coin})\\n"
-            f"📍 Delays: {address}\\n"
-            f"🔗 TXID: {txid[:32]}...\\n\\n"
-            f"Delays delays delays @Conodoperatorbot delays։"
+            f"ATTENTION: Small\\n\\n"
+            f"User: {user_id}\\n"
+            f"Amount: ${usd_val:.2f} ({amount} {coin})\\n"
+            f"Address: {address}\\n"
+            f"TXID: {txid[:32]}...\\n\\n"
+            f"Contact @Conodoperatorbot."
         )
-''')
 
-print("Armenian i18n file generated with button texts from original")
-PYEOF
+    @staticmethod
+    def status_response(txid: str, coin: str, status: str, confs: int, required: int):
+        emoji = MSG.STATUS_EMOJI.get(status, "?")
+        status_text = {
+            "NEW": "New",
+            "CONFIRMING": "Confirming",
+            "CONFIRMED": "Confirmed",
+            "SOLD": "Sold",
+            "WITHDRAWN": "Done",
+            "TRADE_FAILED": "Failed",
+            "PROCESSING_ERROR": "Error"
+        }.get(status, status)
+
+        if status in ["CONFIRMED", "SOLD"]:
+            progress_msg = "Soon!"
+        elif status == "CONFIRMING":
+            progress_msg = "Wait..."
+        else:
+            progress_msg = "Checking..."
+
+        return (
+            f"Status\\n\\n"
+            f"TXID: <code>{txid[:16]}...{txid[-8:]}</code>\\n"
+            f"Coin: {coin}\\n"
+            f"Status: {emoji} {status_text}\\n"
+            f"Confs: {confs}/{required}\\n\\n"
+            f"{progress_msg}"
+        )
+'''
+
+with open('app/i18n/hy.py', 'w', encoding='utf-8') as f:
+    f.write(output)
+
+print(f"\nWrote app/i18n/hy.py ({len(output)} chars)")
+PYTHON_SCRIPT
 
 echo ""
-echo "=== Generated app/i18n/hy.py ==="
-echo ""
-echo "To complete Armenian translation:"
-echo "  1. nano app/i18n/hy.py"
-echo "  2. Reference: cat /tmp/original_armenian_bot.py"
-echo "  3. Replace 'Delays delays' with Armenian text"
+echo "=============================================="
+echo "Installation complete!"
+echo "=============================================="
 echo ""
 echo "Restart services:"
-echo "  systemctl restart convertbot-worker.service convertbot-bot.service"
+echo "  systemctl restart convertbot-bot.service convertbot-worker.service"

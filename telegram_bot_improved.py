@@ -2,12 +2,12 @@
 import asyncio
 import logging
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from app.db import txid_exists, get_txid_owner
+from app.db import txid_exists, get_txid_owner, set_user_lang
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from app.config import settings, fee_display
 from libs.explorer_client import explorer_client
 from app.models import CoinType
-from app.i18n import get_msg, resolve_lang
+from app.i18n import get_msg, resolve_lang, LANGUAGES, LANG_NAMES
 import aiosqlite
 import re
 
@@ -37,16 +37,16 @@ COIN_INFO = {
 }
 
 
-def get_user_msg(update):
-    """Get MSG class for user's language."""
-    lang = resolve_lang(update)
+async def get_user_msg(update):
+    """Get MSG class for user's language (async, checks DB)."""
+    lang = await resolve_lang(update)
     return get_msg(lang)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command - show coin selection."""
     context.user_data.clear()
-    MSG = get_user_msg(update)
+    MSG = await get_user_msg(update)
 
     keyboard = [
         [KeyboardButton(MSG.BTN_BTC_USDT), KeyboardButton(MSG.BTN_LTC_USDT)],
@@ -62,10 +62,71 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSING_COIN
 
 
+async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /lang command - show language selection or set language."""
+    user_id = update.effective_user.id
+    args = context.args
+
+    # If language code provided directly: /lang hy, /lang ru, /lang en
+    if args and len(args) >= 1:
+        lang_code = args[0].lower()
+        if lang_code in LANGUAGES:
+            await set_user_lang(user_id, lang_code)
+            MSG = get_msg(lang_code)
+            await update.message.reply_text(
+                f"Language set to {LANG_NAMES.get(lang_code, lang_code)}",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+        else:
+            await update.message.reply_text(
+                f"Unknown language: {lang_code}\nAvailable: hy, ru, en"
+            )
+            return
+
+    # Show language selection keyboard
+    keyboard = [
+        [KeyboardButton("Hayeren")],
+        [KeyboardButton("English")],
+        [KeyboardButton("Russkiy")],
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    await update.message.reply_text(
+        "Select language / Vyberi yazyk / Yntrek lezu:",
+        reply_markup=reply_markup
+    )
+
+
+async def lang_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle language selection from keyboard."""
+    text = update.message.text.lower()
+    user_id = update.effective_user.id
+
+    lang_code = None
+    if "hay" in text or "armenia" in text:
+        lang_code = "hy"
+    elif "eng" in text:
+        lang_code = "en"
+    elif "rus" in text:
+        lang_code = "ru"
+
+    if lang_code:
+        await set_user_lang(user_id, lang_code)
+        MSG = get_msg(lang_code)
+        await update.message.reply_text(
+            f"Language: {LANG_NAMES.get(lang_code, lang_code)}",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    else:
+        await update.message.reply_text(
+            "Please select: Hayeren / English / Russkiy"
+        )
+
+
 async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle coin selection."""
     text = update.message.text
-    MSG = get_user_msg(update)
+    MSG = await get_user_msg(update)
 
     # Check if user clicked "Check Status" (any language)
     if any(x in text.lower() for x in ["check", "status", "prover", "stugel"]):
@@ -122,7 +183,7 @@ async def coin_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def waiting_for_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle TXID input."""
     text = update.message.text
-    MSG = get_user_msg(update)
+    MSG = await get_user_msg(update)
 
     # Check for "I sent" button in any language
     if any(x in text.lower() for x in ["sent", "otpravil", "ugharkel"]):
@@ -169,7 +230,7 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle address input."""
     address = update.message.text.strip()
     user_id = update.message.from_user.id
-    MSG = get_user_msg(update)
+    MSG = await get_user_msg(update)
 
     if not (address.startswith("T") and len(address) == 34):
         await update.message.reply_text(
@@ -232,7 +293,7 @@ async def address_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check user's transaction status."""
     user_id = update.effective_user.id
-    MSG = get_user_msg(update)
+    MSG = await get_user_msg(update)
 
     async with aiosqlite.connect("swapbot.db") as conn:
         async with conn.execute(
@@ -275,7 +336,7 @@ async def check_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel conversation."""
-    MSG = get_user_msg(update)
+    MSG = await get_user_msg(update)
     context.user_data.clear()
     await update.message.reply_text(
         MSG.CANCELLED,
@@ -286,7 +347,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown commands or messages."""
-    MSG = get_user_msg(update)
+    MSG = await get_user_msg(update)
     await update.message.reply_text(MSG.UNKNOWN_COMMAND)
 
 
@@ -295,7 +356,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling update: {context.error}")
     try:
         if update and update.effective_message:
-            MSG = get_user_msg(update)
+            MSG = await get_user_msg(update)
             await update.effective_message.reply_text(MSG.BOT_ERROR)
     except Exception as e:
         logger.error(f"Error in error handler: {e}")
@@ -304,7 +365,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle conversation timeout."""
     if update and update.effective_message:
-        MSG = get_user_msg(update)
+        MSG = await get_user_msg(update)
         await update.effective_message.reply_text(MSG.SESSION_TIMEOUT)
     return ConversationHandler.END
 
@@ -330,6 +391,15 @@ def main():
     )
 
     application.add_handler(conv_handler)
+
+    # Language command handler
+    application.add_handler(CommandHandler("lang", lang_command))
+
+    # Handler for language selection (from keyboard)
+    application.add_handler(MessageHandler(
+        filters.Regex("(?i)^(hayeren|english|russkiy)$"),
+        lang_selection
+    ))
 
     # Handler for check commands
     application.add_handler(CommandHandler("status", check_transaction))
@@ -359,6 +429,7 @@ def main():
     print("   Monero -> USDT")
     print(f"Fee: {fee_display()}")
     print("Languages: Armenian (hy), English (en), Russian (ru)")
+    print("Commands: /start, /lang, /status, /check")
     application.run_polling(drop_pending_updates=True)
 
 

@@ -73,6 +73,13 @@ async def init_db():
                 usdt_trc20_address TEXT NOT NULL
             )
         """)
+        # User settings table for language preferences
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id INTEGER PRIMARY KEY,
+                lang TEXT DEFAULT NULL
+            )
+        """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS withdrawals (
                 txid TEXT PRIMARY KEY,
@@ -369,3 +376,24 @@ async def reset_retry_count(txid: str) -> None:
         )
         await conn.commit()
     logger.info(f"Reset retry count for {txid[:16]}...")
+
+
+async def get_user_lang(user_id: int) -> Optional[str]:
+    """Get user's preferred language from database."""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        async with conn.execute(
+            "SELECT lang FROM user_settings WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    return row[0] if row and row[0] else None
+
+
+async def set_user_lang(user_id: int, lang: str) -> None:
+    """Set user's preferred language in database."""
+    async with aiosqlite.connect(get_db_path()) as conn:
+        await conn.execute(
+            "INSERT OR REPLACE INTO user_settings (user_id, lang) VALUES (?, ?)",
+            (user_id, lang)
+        )
+        await conn.commit()
+    logger.info(f"Set user {user_id} language to {lang}")
