@@ -45,41 +45,21 @@ async def get_user_msg(update):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command - show language selection for first-time users, else coin selection."""
+    """Start command - always show language selection first."""
     context.user_data.clear()
-    user_id = update.effective_user.id
 
-    # Check if user has a saved language preference
-    saved_lang = await get_user_lang(user_id)
-
-    if not saved_lang:
-        # First-time user - show language selection
-        keyboard = [
-            [KeyboardButton("Hayeren")],
-            [KeyboardButton("English")],
-            [KeyboardButton("Russkiy")],
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-        await update.message.reply_text(
-            "Select language / \u0412\u044b\u0431\u0435\u0440\u0438 \u044f\u0437\u044b\u043a / \u0538\u0576\u057f\u0580\u0565\u056f \u056c\u0565\u0566\u0578\u0582:",
-            reply_markup=reply_markup
-        )
-        return CHOOSING_LANG
-
-    # Returning user - show main menu
-    MSG = await get_user_msg(update)
+    # Always show language selection on /start
     keyboard = [
-        [KeyboardButton(MSG.BTN_BTC_USDT), KeyboardButton(MSG.BTN_LTC_USDT)],
-        [KeyboardButton(MSG.BTN_DASH_USDT), KeyboardButton(MSG.BTN_DASH_TRX)],
-        [KeyboardButton(MSG.BTN_XMR_USDT)],
-        [KeyboardButton(MSG.BTN_CHECK_STATUS)],
+        [KeyboardButton("Hayeren")],
+        [KeyboardButton("English")],
+        [KeyboardButton("Russkiy")],
     ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(
-        MSG.welcome(),
+        "Select language / \u0412\u044b\u0431\u0435\u0440\u0438 \u044f\u0437\u044b\u043a / \u0538\u0576\u057f\u0580\u0565\u056f \u056c\u0565\u0566\u0578\u0582:",
         reply_markup=reply_markup
     )
-    return CHOOSING_COIN
+    return CHOOSING_LANG
 
 
 async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
