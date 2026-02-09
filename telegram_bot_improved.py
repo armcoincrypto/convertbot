@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from app.db import txid_exists, get_txid_owner, set_user_lang
+from app.db import txid_exists, get_txid_owner, set_user_lang, get_user_lang
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from app.config import settings, fee_display
 from libs.explorer_client import explorer_client
@@ -19,6 +19,7 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 CHOOSING_COIN, WAITING_TXID, WAITING_ADDRESS = range(3)
+CHOOSING_LANG = 10  # State for language selection
 
 DEPOSIT_ADDRESSES = {
     "BTC": "33vFCeDJXdEPTnWFEyy5tRy85iQo1oBtw4",
@@ -44,10 +45,29 @@ async def get_user_msg(update):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command - show coin selection."""
+    """Start command - show language selection for first-time users, else coin selection."""
     context.user_data.clear()
-    MSG = await get_user_msg(update)
+    user_id = update.effective_user.id
 
+    # Check if user has a saved language preference
+    saved_lang = await get_user_lang(user_id)
+
+    if not saved_lang:
+        # First-time user - show language selection
+        keyboard = [
+            [KeyboardButton("Hayeren")],
+            [KeyboardButton("English")],
+            [KeyboardButton("Russkiy")],
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+        await update.message.reply_text(
+            "Select language / \u0412\u044b\u0431\u0435\u0440\u0438 \u044f\u0437\u044b\u043a / \u0538\u0576\u057f\u0580\u0565\u056f \u056c\u0565\u0566\u0578\u0582:",
+            reply_markup=reply_markup
+        )
+        return CHOOSING_LANG
+
+    # Returning user - show main menu
+    MSG = await get_user_msg(update)
     keyboard = [
         [KeyboardButton(MSG.BTN_BTC_USDT), KeyboardButton(MSG.BTN_LTC_USDT)],
         [KeyboardButton(MSG.BTN_DASH_USDT), KeyboardButton(MSG.BTN_DASH_TRX)],
@@ -60,9 +80,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
     return CHOOSING_COIN
-
-
-CHOOSING_LANG = 10  # New state for language selection
 
 
 async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
