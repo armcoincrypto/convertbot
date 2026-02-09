@@ -81,8 +81,20 @@ async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"Language: {LANG_NAMES.get(lang_code, lang_code)}"
             )
-            # Immediately show main menu in selected language
-            return await start(update, context)
+            # Show main menu in selected language
+            MSG = get_msg(lang_code)
+            keyboard = [
+                [KeyboardButton(MSG.BTN_BTC_USDT), KeyboardButton(MSG.BTN_LTC_USDT)],
+                [KeyboardButton(MSG.BTN_DASH_USDT), KeyboardButton(MSG.BTN_DASH_TRX)],
+                [KeyboardButton(MSG.BTN_XMR_USDT)],
+                [KeyboardButton(MSG.BTN_CHECK_STATUS)],
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            await update.message.reply_text(
+                MSG.welcome(),
+                reply_markup=reply_markup
+            )
+            return CHOOSING_COIN
         else:
             await update.message.reply_text(
                 f"Unknown language: {lang_code}\nAvailable: hy, ru, en"
@@ -121,14 +133,25 @@ async def lang_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lang_code:
         await set_user_lang(user_id, lang_code)
-        MSG = get_msg(lang_code)
         context.user_data.clear()
-        # Show confirmation then immediately show main menu
+        # Show confirmation
         await update.message.reply_text(
             f"Language: {LANG_NAMES.get(lang_code, lang_code)}"
         )
-        # Now show main menu in selected language
-        return await start(update, context)
+        # Show main menu in selected language
+        MSG = get_msg(lang_code)
+        keyboard = [
+            [KeyboardButton(MSG.BTN_BTC_USDT), KeyboardButton(MSG.BTN_LTC_USDT)],
+            [KeyboardButton(MSG.BTN_DASH_USDT), KeyboardButton(MSG.BTN_DASH_TRX)],
+            [KeyboardButton(MSG.BTN_XMR_USDT)],
+            [KeyboardButton(MSG.BTN_CHECK_STATUS)],
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            MSG.welcome(),
+            reply_markup=reply_markup
+        )
+        return CHOOSING_COIN
     else:
         await update.message.reply_text(
             "Please select: Hayeren / English / Russkiy"
