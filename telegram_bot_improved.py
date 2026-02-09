@@ -78,12 +78,11 @@ async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lang_code = args[0].lower()
         if lang_code in LANGUAGES:
             await set_user_lang(user_id, lang_code)
-            MSG = get_msg(lang_code)
             await update.message.reply_text(
-                f"Language set to {LANG_NAMES.get(lang_code, lang_code)}",
-                reply_markup=ReplyKeyboardRemove()
+                f"Language: {LANG_NAMES.get(lang_code, lang_code)}"
             )
-            return ConversationHandler.END
+            # Immediately show main menu in selected language
+            return await start(update, context)
         else:
             await update.message.reply_text(
                 f"Unknown language: {lang_code}\nAvailable: hy, ru, en"
@@ -124,11 +123,12 @@ async def lang_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await set_user_lang(user_id, lang_code)
         MSG = get_msg(lang_code)
         context.user_data.clear()
+        # Show confirmation then immediately show main menu
         await update.message.reply_text(
-            f"Language: {LANG_NAMES.get(lang_code, lang_code)}\n\nPress /start to continue.",
-            reply_markup=ReplyKeyboardRemove()
+            f"Language: {LANG_NAMES.get(lang_code, lang_code)}"
         )
-        return ConversationHandler.END
+        # Now show main menu in selected language
+        return await start(update, context)
     else:
         await update.message.reply_text(
             "Please select: Hayeren / English / Russkiy"

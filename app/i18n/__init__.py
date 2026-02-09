@@ -20,9 +20,9 @@ LANGUAGES = {
 
 # Language display names for UI
 LANG_NAMES = {
-    'hy': 'Հայdelays',
+    'hy': '\u0540\u0561\u0575\u0565\u0580\u0565\u0576',  # Hayeren in Armenian
     'en': 'English',
-    'ru': 'delays',
+    'ru': '\u0420\u0443\u0441\u0441\u043a\u0438\u0439',  # Russkiy in Russian
 }
 
 DEFAULT_LANG = 'hy'
